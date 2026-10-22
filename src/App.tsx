@@ -45,7 +45,7 @@ export default function App() {
       <div className="club-label">SUA PELADA</div>
       <div className="club"><span className="club-crest">R<span>5</span></span><div><strong>Resenha Campo 5</strong><small>Rio de Janeiro, RJ</small></div></div>
       <nav aria-label="Menu principal">{navigation.map(({ name, icon: Icon }) => <button key={name} className={page === name ? 'nav-item active' : 'nav-item'} onClick={() => navigate(name)}><Icon size={19}/>{name}{name === 'Convites' && <span className="nav-count">{invites.length}</span>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="field-note"><span className="live-dot"/> A resenha tem lugar marcado.<p>Sábado, bola no pé.<br/>O resto a gente organiza.</p></div><div className="profile"><span className="avatar">R</span><div><strong>Ricardo</strong><small>Organizador · OWNER</small></div><CircleHelp size={18}/></div></div>
+      <div className="sidebar-bottom"><div className="field-note"><span className="live-dot"/> A resenha tem lugar marcado.<p>Sábado, bola no pé.<br/>O resto a gente organiza.</p></div><div className="profile"><span className="avatar">R</span><div><strong>Ricardo · simulação</strong><small>Prévia OWNER · sem login</small></div><CircleHelp size={18}/></div></div>
     </aside>
     {menu && <button className="menu-backdrop" aria-label="Fechar menu" onClick={() => setMenu(false)}/>}
     <div className="main-shell">

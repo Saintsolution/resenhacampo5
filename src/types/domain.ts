@@ -1,15 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});
-
+// Tipos de domínio preservados; o contrato com o n8n será definido em etapa posterior.
 export type Categoria = 'owner' | 'admin' | 'mensalista' | 'diarista';
 export type PapelAdmin = 'owner' | 'admin' | 'nenhum';
 export type Situacao = 'ativo' | 'suspenso' | 'removido';
@@ -31,7 +20,6 @@ export interface Organizador {
   nome: string;
   email: string;
   telefone: string | null;
-  asaas_api_key_enc: string | null;
   asaas_wallet_id: string | null;
   created_at: string;
   updated_at: string;

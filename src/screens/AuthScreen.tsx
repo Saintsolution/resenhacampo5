@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/auth';
 import { Button, Input } from '@/components/ui';
 import { validateEmail, validatePhone } from '@/lib/utils';
 import { Trophy, Shield, Users, UserCircle, ArrowRight } from 'lucide-react';
@@ -61,6 +61,7 @@ export default function AuthScreen() {
           </div>
           <h1 className="text-3xl font-bold text-white">JogoLindo</h1>
           <p className="text-emerald-100 mt-1">RESENHA FUTEBOL CAMPO 5</p>
+          <p className="text-white text-xs mt-3">Prévia de acesso · autenticação indisponível nesta etapa.</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8">

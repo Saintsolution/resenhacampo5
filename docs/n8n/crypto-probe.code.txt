@@ -1,0 +1,69 @@
+// TESTE ISOLADO: Code node JavaScript, Run Once for All Items.
+// Executar somente em ambiente de homologação aprovado. Não recebe $input.
+// Sem rede, Sheets, Asaas, arquivos, variáveis de ambiente ou dados reais.
+// Não retorna senhas, salts, hashes ou tokens. Não instala módulos.
+const report = { fictitious_data_only: true, crypto: { available: false }, password_algorithms: [] };
+let crypto;
+try { crypto = require('crypto'); } catch { /* indisponível ou não autorizado */ }
+if (crypto) {
+  try {
+    const one = crypto.randomBytes(32).toString('hex');
+    const two = crypto.randomBytes(32).toString('hex');
+    const digest = crypto.createHash('sha256').update(one, 'utf8').digest('hex');
+    report.crypto = {
+      available: true,
+      random_source: 'crypto.randomBytes',
+      token_bits: 256,
+      token_length_valid: one.length === 64 && two.length === 64,
+      sample_tokens_differ: one !== two,
+      sha256_known_vector_valid: crypto.createHash('sha256').update('abc').digest('hex') === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      token_hash_repeatable: digest === crypto.createHash('sha256').update(one, 'utf8').digest('hex'),
+      token_hash_changes: digest !== crypto.createHash('sha256').update(two, 'utf8').digest('hex'),
+      hash_length_valid: digest.length === 64,
+    };
+  } catch { report.crypto = { available: true, test_failed: true }; }
+}
+const dummyPassword = 'SOMENTE-TESTE-JogoLindo-2026!';
+const wrongPassword = 'ERRADA-SOMENTE-TESTE-2026!';
+let argon2;
+try { argon2 = require('argon2'); } catch { /* não distingue ausente de bloqueado */ }
+if (argon2) {
+  const started = Date.now();
+  try {
+    const params = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1, hashLength: 32 };
+    const first = await argon2.hash(dummyPassword, params);
+    const second = await argon2.hash(dummyPassword, params);
+    const parts = first.split('$');
+    const otherParts = second.split('$');
+    const checks = {
+      correct_password: await argon2.verify(first, dummyPassword),
+      wrong_password_rejected: !(await argon2.verify(first, wrongPassword)),
+      independent_salts: parts[4] !== otherParts[4],
+      hashes_differ: first !== second,
+      parameters_match: parts[1] === 'argon2id' && parts[3] === 'm=19456,t=2,p=1',
+    };
+    report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: true, checks, passed: Object.values(checks).every(Boolean), params: { memory_kib: 19456, iterations: 2, parallelism: 1 }, total_ms_for_four_operations: Date.now() - started });
+  } catch { report.password_algorithms.push({ algorithm: 'argon2id', available: true, passed: false, reason: 'probe_failed_without_sensitive_details' }); }
+} else report.password_algorithms.push({ algorithm: 'argon2id', available: false, reason: 'module_absent_or_not_allowed' });
+let bcrypt;
+try { bcrypt = require('bcrypt'); } catch { /* não distingue ausente de bloqueado */ }
+if (bcrypt) {
+  const started = Date.now();
+  try {
+    const cost = 12;
+    const first = await bcrypt.hash(dummyPassword, cost);
+    const second = await bcrypt.hash(dummyPassword, cost);
+    const checks = {
+      correct_password: await bcrypt.compare(dummyPassword, first),
+      wrong_password_rejected: !(await bcrypt.compare(wrongPassword, first)),
+      independent_salts: first.slice(7, 29) !== second.slice(7, 29),
+      hashes_differ: first !== second,
+      parameters_match: bcrypt.getRounds(first) === cost && bcrypt.getRounds(second) === cost,
+    };
+    report.password_algorithms.push({ algorithm: 'bcrypt', module: 'bcrypt', available: true, checks, passed: Object.values(checks).every(Boolean), params: { cost }, total_ms_for_four_operations: Date.now() - started });
+  } catch { report.password_algorithms.push({ algorithm: 'bcrypt', available: true, passed: false, reason: 'probe_failed_without_sensitive_details' }); }
+} else report.password_algorithms.push({ algorithm: 'bcrypt', available: false, reason: 'module_absent_or_not_allowed' });
+const cryptoChecks = report.crypto;
+report.ready_for_next_review = cryptoChecks.available === true && cryptoChecks.test_failed !== true && cryptoChecks.token_length_valid === true && cryptoChecks.sample_tokens_differ === true && cryptoChecks.sha256_known_vector_valid === true && cryptoChecks.token_hash_repeatable === true && cryptoChecks.token_hash_changes === true && cryptoChecks.hash_length_valid === true && report.password_algorithms.some(item => item.passed === true);
+// Não é aprovação de produção, auditoria de entropia ou benchmark de carga.
+return [{ json: report }];

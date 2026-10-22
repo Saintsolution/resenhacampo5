@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/auth';
 import { Button, Card } from '@/components/ui';
-import { Shield, Users, UserCircle, Trophy, ChevronRight, LogOut, Plus } from 'lucide-react';
+import { Shield, Users, UserCircle, Trophy, ChevronRight, LogOut } from 'lucide-react';
 
 export default function BlockSelect({
   onSelect,
@@ -10,8 +9,7 @@ export default function BlockSelect({
   onSelect: (block: 'admin' | 'mensalista' | 'diarista', peladaId: string) => void;
 }) {
   const { user, organizador, participantes, peladas, signOut, selecionarPelada } = useAuth();
-  const [selectedPelada, setSelectedPelada] = useState<string>('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [selectedPelada, setSelectedPelada] = useState<string>(peladas[0]?.id ?? '');
 
   const allPeladas = peladas;
   const myParticipantes = participantes;
@@ -56,7 +54,7 @@ export default function BlockSelect({
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-slate-900 mb-2">Bem-vindo{organizador ? `, ${organizador.nome.split(' ')[0]}` : ''}!</h1>
-        <p className="text-slate-500 mb-6">Selecione a pelada e como deseja acessar.</p>
+        <p className="text-slate-500 mb-6">Prévia de acesso à Resenha Campo 5. Autenticação ainda não conectada.</p>
 
         {peladaOptions.length === 0 && !organizador ? (
           <Card className="p-8 text-center">
@@ -81,11 +79,7 @@ export default function BlockSelect({
                     </option>
                   ))}
                 </select>
-                {organizador && (
-                  <Button variant="secondary" onClick={() => setShowCreate(true)}>
-                    <Plus className="w-4 h-4" /> Nova pelada
-                  </Button>
-                )}
+
               </div>
             </div>
 
@@ -125,7 +119,6 @@ export default function BlockSelect({
               </div>
             )}
 
-            {showCreate && <CreatePeladaForm onClose={() => setShowCreate(false)} />}
           </>
         )}
       </main>
@@ -172,79 +165,5 @@ function BlockCard({
         </div>
       )}
     </button>
-  );
-}
-
-function CreatePeladaForm({ onClose }: { onClose: () => void }) {
-  const { organizador, refreshOrganizador } = useAuth();
-  const [nome, setNome] = useState('');
-  const [local, setLocal] = useState('Aterro do Flamengo — Campo 5');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!organizador) return;
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.from('peladas').insert({
-      organizador_id: organizador.id,
-      nome: nome || 'RESENHA FUTEBOL CAMPO 5',
-      local,
-      dia_semana: 'sabado',
-      horario_inicio: '09:00',
-      horario_fim: '10:00',
-      valor_mensalidade: 30.0,
-      valor_diaria_sem_colete: 15.0,
-      valor_diaria_com_colete: 20.0,
-      valor_colete_avulso: 5.0,
-      dia_vencimento_mensal: 10,
-      validade_convite_horas: 72,
-      horario_corte_mural: '08:50',
-      ativa: true,
-    });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      await refreshOrganizador();
-      onClose();
-    }
-    setLoading(false);
-  }
-
-  return (
-    <Card className="p-5 mt-4">
-      <h3 className="font-bold text-slate-900 mb-4">Criar nova pelada</h3>
-      <form onSubmit={handleCreate} className="space-y-3">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Nome da pelada</label>
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            placeholder="RESENHA FUTEBOL CAMPO 5"
-            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Local</label>
-          <input
-            value={local}
-            onChange={(e) => setLocal(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none"
-          />
-        </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex gap-2">
-          <Button type="submit" disabled={loading}>
-            {loading ? 'Criando...' : 'Criar pelada'}
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-        </div>
-      </form>
-    </Card>
   );
 }
