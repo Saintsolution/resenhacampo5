@@ -149,3 +149,10 @@ th,.finance-link { background: #c7d0a4; }
 .welcome-hero { isolation: isolate; }
 .welcome-hero-ended::after { content: ''; position: absolute; inset: 0; background: #3c4a2d; mix-blend-mode: color; pointer-events: none; z-index: 1; }
 .welcome-video-controls { z-index: 2; }
+.owner-panel-nav { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+.invite-manager { margin-top: 25px; text-align: left; }
+.invite-manager h2 { font-size: 20px; font-weight: 500; }
+.invite-manager > p { font-size: 13px; line-height: 1.8; margin-top: 12px; color: #526148; }
+.invite-manager a { text-decoration: none; }
+.invite-link { width: 100%; min-height: 40px; padding: 9px; border: 1px solid #a5b48b; border-radius: 7px; background: #e7dbaf; color: #30472f; font-size: 11px; }
+.invite-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 28px; }

@@ -1,3 +1,5 @@
+import InviteManager from './InviteManager';
+import InvitationAccess from './InvitationAccess';
 import { nextGameDate, formatGameDate } from '../lib/matchDate';
 import { formatCurrency } from '../lib/utils';
 import BackButton from './BackButton';
@@ -8,8 +10,8 @@ import { validateCPF } from '../lib/utils';
 import { bootstrapConfigured, initialPelada, registerPelada, validatePelada, type BootstrapPayload, type PeladaSetup } from '../lib/n8n/bootstrap';
 import { ownerRequest, type OwnerSession } from '../lib/n8n/owner';
 
-type Screen = 'inicio' | 'cadastro' | 'pelada' | 'login';
-const fromHash = (): Screen => location.hash === '#/criar-pelada' ? 'cadastro' : location.hash === '#/entrar' || location.hash === '#/admin' ? 'login' : 'inicio';
+type Screen = 'inicio' | 'cadastro' | 'pelada' | 'login' | 'convite';
+const fromHash = (): Screen => location.hash.startsWith('#/convite') ? 'convite' : location.hash === '#/criar-pelada' ? 'cadastro' : location.hash === '#/entrar' || location.hash === '#/admin' ? 'login' : 'inicio';
 
 export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
   const [screen, setScreen] = useState<Screen>(fromHash);
@@ -24,6 +26,7 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     window.addEventListener('popstate', onHash);
     return () => { window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash); };
   }, []);
+  const [showInvites,setShowInvites] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -63,7 +66,7 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
         const session = await ownerRequest<OwnerSession>('sessao', { token: login.token_sessao });
         if (!session.autenticado || session.papel_administrativo !== 'OWNER') throw new Error('Este acesso é exclusivo do organizador.');
         if (!session.pelada) throw new Error('A sessão foi validada, mas a pelada não foi carregada. Importe o workflow 11 atualizado.');
-        form.reset(); setAuth({ token: login.token_sessao, session });
+        form.reset(); setShowInvites(false); setAuth({ token: login.token_sessao, session });
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { submitting.current=false; setBusy(false); }
   }
@@ -88,10 +91,11 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível revogar a sessão.'); }
     finally { setBusy(false); }
   }
+  if (screen === 'convite' && !auth) return <InvitationAccess onHome={()=>change('inicio')}/>;
   if (screen === 'inicio' && !auth) return <Landing onCreate={()=>change('cadastro')} onLogin={()=>change('login')} onAdmin={()=>{change('login');history.replaceState(null,'','#/admin');}} onDemo={onDemo}/>;
   if (auth && auth.session.pelada) {
     const club=auth.session.pelada;
-    return <div className="demo-entry"><section className="entry-card owner-panel"><img src="/marca_resenha.jpg" alt="Resenha FC"/><div className="eyebrow">PAINEL DO ORGANIZADOR</div><h1>{club.nome}</h1><p>Olá, {auth.session.nome}.</p><div className="entry-explanation"><strong><ShieldCheck size={18}/> OWNER · {auth.session.categoria || 'Somente organização'}</strong><span>{club.local}{club.cidade && <><br/>{club.cidade}</>}</span></div><div className="entry-explanation"><strong>Próxima pelada</strong><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}</span><strong>{auth.session.total_jogadores ?? '—'} jogadores ativos cadastrados</strong></div><div className="entry-explanation"><strong>Valores cadastrados</strong><span>Mensalidade: {formatCurrency(club.mensalidade)}<br/>Diária sem colete: {formatCurrency(club.diaria_sem_colete)}<br/>Diária com colete: {formatCurrency(club.diaria_com_colete)}<br/>Colete avulso: {formatCurrency(club.colete_avulso)}<br/>Vencimento mensal: dia {club.vencimento_mensal}<br/>Convites: {club.validade_convite_horas} horas</span></div><small>Dados carregados da sua pelada. Convites e os demais módulos serão conectados após validarmos este primeiro acesso.</small>{error && <p role="alert">{error}</p>}<button className="button primary" disabled={busy} onClick={logout}><LogOut size={17}/>{busy ? 'Encerrando…' : 'Sair'}</button></section></div>;
+    return <div className="demo-entry"><section className="entry-card owner-panel"><img src="/marca_resenha.jpg" alt="Resenha FC"/><div className="eyebrow">PAINEL DO ORGANIZADOR</div><h1>{club.nome}</h1><p>Olá, {auth.session.nome}.</p><nav className="owner-panel-nav" aria-label="Painel do organizador"><button className={`button ${!showInvites?'primary':'light'}`} onClick={()=>setShowInvites(false)}>Dashboard</button><button className={`button ${showInvites?'primary':'light'}`} onClick={()=>setShowInvites(true)}>Convidar jogador</button></nav>{showInvites?<InviteManager token={auth.token} club={club}/>:<><div className="entry-explanation"><strong><ShieldCheck size={18}/> OWNER · {auth.session.categoria || 'Somente organização'}</strong><span>{club.local}{club.cidade && <><br/>{club.cidade}</>}</span></div><div className="entry-explanation"><strong>Próxima pelada</strong><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}</span><strong>{auth.session.total_jogadores ?? '—'} jogadores ativos cadastrados</strong></div><div className="entry-explanation"><strong>Valores cadastrados</strong><span>Mensalidade: {formatCurrency(club.mensalidade)}<br/>Diária sem colete: {formatCurrency(club.diaria_sem_colete)}<br/>Diária com colete: {formatCurrency(club.diaria_com_colete)}<br/>Colete avulso: {formatCurrency(club.colete_avulso)}<br/>Vencimento mensal: dia {club.vencimento_mensal}<br/>Convites: {club.validade_convite_horas} horas</span></div><small>Dados carregados da sua pelada.</small></>}{error && <p role="alert">{error}</p>}<button className="button primary" disabled={busy} onClick={logout}><LogOut size={17}/>{busy ? 'Encerrando…' : 'Sair'}</button></section></div>;
   }
 
   return <div className="demo-entry"><section className="entry-card"><BackButton disabled={busy} onClick={()=>change('inicio')}/><img src="/marca_resenha.jpg" alt="Resenha FC"/><div className="eyebrow">RESENHA FUTEBOL CAMPO 5</div><h1>{screen === 'cadastro' ? 'Seus dados de organizador' : screen === 'pelada' ? 'Crie sua pelada' : screen === 'login' ? location.hash === '#/admin' ? 'Acesso administrativo' : 'Entrar na minha pelada' : 'A resenha começa aqui.'}</h1><p>Aterro do Flamengo · Campo 5<br/>Sábados, das 09h às 10h</p>{screen === 'inicio' ? <><button className="button primary" onClick={() => change('login')}>Entrar na minha pelada<ArrowUpRight size={17}/></button><button className="button light" onClick={() => change('cadastro')}>Criar minha pelada</button><button className="text-button" onClick={onDemo}>Explorar demonstração com dados fictícios</button><small>Cadastro inicial exclusivo do responsável, com código de ativação.</small></> : screen === 'pelada' && organizer ? <>

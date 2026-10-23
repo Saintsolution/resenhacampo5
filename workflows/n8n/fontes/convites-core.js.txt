@@ -1,0 +1,98 @@
+const INVITE_BASE=['convite_id','pelada_id','convidador_id','convidador_nome','telefone_destino','categoria_destino','emitido_em','expira_em','situacao','utilizado_em','participante_id','email_confirmado_em'];
+const INVITE_EXTRA=['apelido_destino','tipo_convite','jogo_id'];
+const MONTH_FIELDS=['participante_id','apelido','competencia','vencimento','valor','payment_id','subscription_id','status_asaas','pago_em','apto_financeiro','atualizado_em'];
+function prepareInvite(action,request,config) {
+ const fail=(status,code,msg)=>({...reply(status,code,msg),canRun:false});
+ const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
+ if(headers.origin && headers.origin!==config.origem)return fail(403,'ORIGEM_INVALIDA','Origem não autorizada.');
+ if(!/^https:\/\//.test(config.frontend_url) || !Number.isInteger(config.gid_convites))return fail(503,'CONFIGURACAO_PENDENTE','Confira a configuração de convites.');
+ const body=request.body??{};
+ if(typeof body!=='object'||Array.isArray(body))return fail(400,'DADOS_INVALIDOS','Confira os dados do convite.');
+ const token=action==='validar'?body.token:String(headers.authorization??'').match(/^Bearer ([a-f0-9]{64})$/i)?.[1];
+ if(typeof token!=='string'||!/^[a-f0-9]{64}$/i.test(token))return fail(action==='validar'?400:401,'ACESSO_INVALIDO','Acesso ou convite inválido.');
+ let input=null;
+ if(action==='criar') {
+  const key=String(headers['idempotency-key']??'');
+  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(key)||typeof body.apelido!=='string'||!body.apelido.trim()||body.apelido.length>40||!['ADMIN','MENSALISTA','DIARISTA'].includes(body.tipo))return fail(400,'DADOS_INVALIDOS','Confira apelido e tipo do convite.');
+  let phone=digits(body.whatsapp);if(phone.length===10||phone.length===11)phone='55'+phone;
+  if(!/^55\d{10,11}$/.test(phone))return fail(400,'TELEFONE_INVALIDO','Informe WhatsApp brasileiro com DDD.');
+  if(body.tipo==='DIARISTA' && (typeof body.data_jogo!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(body.data_jogo)))return fail(400,'JOGO_INVALIDO','Informe o jogo do diarista.');
+  input={key:key.toLowerCase(),apelido:body.apelido.trim(),whatsapp:phone,tipo:body.tipo,data_jogo:body.tipo==='DIARISTA'?body.data_jogo:''};
+ }
+ return {canRun:true,action,token,input,config};
+}
+function planInvite(p,snapshot,hashes,nowMs) {
+ const deny=(status,code,msg)=>reply(status,code,msg);
+ try {
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const tokens=readTable(snapshot,1,'TOKENS_ACESSO',TOKEN_FIELDS);
+  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);
+  const tab=snapshot.valueRanges?.[4];const values=tab?.values;
+  if(!tab||!String(tab.range).replace(/'/g,'').startsWith('CONVITES!')||!Array.isArray(values)||values.length>5001||INVITE_BASE.some((k,i)=>values[0]?.[i]!==k))throw new Error('schema');
+  const tail=values[0].slice(12);if(tail.length && (tail.length!==3||INVITE_EXTRA.some((k,i)=>tail[i]!==k)))throw new Error('invite_schema');
+  const fields=[...INVITE_BASE,...INVITE_EXTRA];
+  const invitations=values.slice(1).filter(r=>r.some(v=>String(v??'').trim())).map(r=>Object.fromEntries(fields.map((f,i)=>[f,r[i]??''])));
+  if(new Set(invitations.map(r=>r.convite_id)).size!==invitations.length)throw new Error('duplicate_invite');
+  const now=new Date(nowMs).toISOString();
+  const valid=r=>r.situacao==='ABERTO'&&!r.utilizado_em&&Number.isFinite(Date.parse(r.expira_em))&&Date.parse(r.expira_em)>nowMs;
+  const present=r=>({convite_id:r.convite_id,apelido:r.apelido_destino,tipo:r.tipo_convite,categoria:r.categoria_destino,whatsapp:r.telefone_destino,convidador_nome:r.convidador_nome,emitido_em:r.emitido_em,expira_em:r.expira_em,data_jogo:String(r.jogo_id).match(/_(\d{4}-\d{2}-\d{2})$/)?.[1]??'',situacao:r.utilizado_em?'UTILIZADO':r.situacao==='ABERTO'&&!valid(r)?'EXPIRADO':r.situacao});
+  if(p.action==='validar') {
+   const matching=tokens.filter(t=>t.tipo_usuario==='CONVITE'&&t.token_hash===hashes.tokenHash&&!t.utilizado_em&&Date.parse(t.expira_em)>nowMs);
+   if(matching.length!==1)return deny(400,'CONVITE_INVALIDO','Convite inválido, expirado ou já utilizado.');
+   const r=invitations.find(i=>i.convite_id===matching[0].id_usuario);
+   if(!r||!valid(r)||matching[0].finalidade!=='CONVITE_'+r.tipo_convite)return deny(400,'CONVITE_INVALIDO','Convite inválido, expirado ou já utilizado.');
+   const club=clubs.find(c=>c.pelada_id===r.pelada_id&&c.situacao==='ativo');if(!club)throw new Error('club');
+   const by=players.find(player=>player.participante_id===r.convidador_id);
+   return reply(200,'CONVITE_VALIDO','Convite válido.',{convite:{apelido:r.apelido_destino,tipo:r.tipo_convite,categoria:r.categoria_destino,convidador:by?.apelido||'Organização',data_jogo:present(r).data_jogo,expira_em:r.expira_em,pelada:{nome:club.nome,local:club.local,hora_inicio:club.hora_inicio,hora_fim:club.hora_fim}},cadastro_disponivel:false});
+  }
+  const matches=players.filter(r=>r.token_sessao_hash===hashes.tokenHash&&r.situacao==='ativo'&&Date.parse(r.token_expira)>nowMs);
+  if(matches.length!==1)return deny(401,'SESSAO_INVALIDA','Entre novamente para continuar.');
+  const user=matches[0];const clubsForUser=clubs.filter(c=>c.pelada_id===user.pelada_id&&c.situacao==='ativo');
+  if(clubsForUser.length!==1)throw new Error('club');
+  const club=clubsForUser[0];const role=String(user.papel_administrativo).toUpperCase();const admin=role==='ADMIN'||role==='OWNER';
+  if(role==='OWNER'&&club.owner_id!==user.participante_id)return deny(403,'SEM_PERMISSAO','Acesso não autorizado.');
+  if(!admin) {
+   const months=readTable(snapshot,5,'MENSALIDADES',MONTH_FIELDS);
+   const current=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit'}).format(new Date(nowMs));
+   const paid=months.some(m=>m.participante_id===user.participante_id&&m.competencia===current&&['CONFIRMED','RECEIVED','RECEIVED_IN_CASH'].includes(String(m.status_asaas))&&[true,'true','SIM',1].includes(m.apto_financeiro));
+   if(String(user.categoria).toUpperCase()!=='MENSALISTA'||!paid)return deny(403,'SEM_PERMISSAO','Convites disponíveis para organizadores e mensalistas autorizados e aptos.');
+  }
+  const visible=invitations.filter(r=>r.pelada_id===club.pelada_id&&(admin||r.convidador_id===user.participante_id));
+  if(p.action==='listar')return reply(200,'CONVITES_LISTADOS','Convites carregados.',{convites:visible.slice().reverse().map(present)});
+  if(p.action!=='criar')return deny(400,'ACAO_INVALIDA','Operação inválida.');
+  const input=p.input;if(input.tipo==='ADMIN'&&!admin)return deny(403,'SEM_PERMISSAO','Somente organizadores e administradores podem emitir esse convite.');
+  if(!/^[a-f0-9]{64}$/i.test(hashes.candidate)||!/^[a-f0-9]{64}$/i.test(hashes.candidateHash))throw new Error('crypto');
+  let game='';let expires=nowMs+Number(club.convite_horas)*3600000;
+  if(!Number.isFinite(expires)||expires<=nowMs||expires>nowMs+720*3600000)throw new Error('expiry');
+  if(input.tipo==='DIARISTA') {
+   const date=new Date(input.data_jogo+'T12:00:00Z');
+   const end=Date.parse(input.data_jogo+'T'+club.hora_fim+':00-03:00');
+   if(!Number.isFinite(end)||date.toISOString().slice(0,10)!==input.data_jogo||date.getUTCDay()!==Number(club.dia_semana)||end<=nowMs)return deny(400,'JOGO_INVALIDO','Escolha uma data válida da pelada, ainda não encerrada.');
+   game='JOGO_'+club.pelada_id+'_'+input.data_jogo;expires=Math.min(expires,end);
+  }
+  const id='CONVITE_'+input.key;const repeated=invitations.find(r=>r.convite_id===id);
+  if(repeated) {
+   if(repeated.convidador_id!==user.participante_id||repeated.pelada_id!==club.pelada_id||repeated.telefone_destino!==input.whatsapp||repeated.apelido_destino!==input.apelido||repeated.tipo_convite!==input.tipo||repeated.jogo_id!==game)return deny(409,'REQUISICAO_DIVERGENTE','A tentativa já foi utilizada com outros dados.');
+   return reply(200,'CONVITE_JA_REGISTRADO','Convite já registrado. O link secreto não é recuperável após perda da resposta.',{convite:present(repeated),link_disponivel:false});
+  }
+  if(visible.some(r=>r.telefone_destino===input.whatsapp&&r.tipo_convite===input.tipo&&r.jogo_id===game&&valid(r)))return deny(409,'CONVITE_ABERTO_EXISTENTE','Já existe um convite aberto desse tipo para esse número e jogo.');
+  const rateRows=readTable(snapshot,2,'LIMITES_AUTH',RATE_FIELDS);const rateKey='CONVITES:'+user.participante_id;
+  const rates=rateRows.filter(r=>r.chave===rateKey);if(rates.length>1)throw new Error('rate');
+  const rate=rates[0];const start=Date.parse(rate?.janela_inicio);const inWindow=Number.isFinite(start)&&start<=nowMs&&nowMs-start<900000;const count=inWindow?Number(rate.contador):0;
+  if(!Number.isInteger(count)||count<0)throw new Error('rate_count');
+  if(count>=20)return deny(429,'MUITAS_TENTATIVAS','Aguarde antes de emitir mais convites.');
+  const cell=v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v??'')}});
+  const requests=[];
+  requests.push({addNamedRange:{namedRange:{namedRangeId:'rc5_invite_'+input.key.replace(/-/g,'_'),name:'RC5_INVITE_'+input.key.replace(/-/g,'_'),range:{sheetId:p.config.gid_convites,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});
+  if(!tail.length)requests.push({updateCells:{start:{sheetId:p.config.gid_convites,rowIndex:0,columnIndex:12},rows:[{values:INVITE_EXTRA.map(cell)}],fields:'userEnteredValue'}});
+  const invite={convite_id:id,pelada_id:club.pelada_id,convidador_id:user.participante_id,convidador_nome:user.nome,telefone_destino:input.whatsapp,categoria_destino:input.tipo==='DIARISTA'?'Diarista':'Mensalista',emitido_em:now,expira_em:new Date(expires).toISOString(),situacao:'ABERTO',utilizado_em:'',participante_id:'',email_confirmado_em:'',apelido_destino:input.apelido,tipo_convite:input.tipo,jogo_id:game};
+  const append=(gid,cols,r)=>requests.push({appendCells:{sheetId:gid,rows:[{values:cols.map(k=>cell(r[k]??''))}],fields:'userEnteredValue'}});
+  append(p.config.gid_convites,fields,invite);
+  append(p.config.gid_tokens,TOKEN_FIELDS,{token_hash:hashes.candidateHash,tipo_usuario:'CONVITE',id_usuario:id,finalidade:'CONVITE_'+input.tipo,expira_em:invite.expira_em,utilizado_em:''});
+  const newRate={chave:rateKey,acao:'criar_convite',janela_inicio:inWindow?rate.janela_inicio:now,contador:count+1,bloqueado_ate:count+1>=20?new Date((inWindow?start:nowMs)+900000).toISOString():''};
+  if(rate){const i=snapshot.valueRanges[2].values.findIndex((r,i)=>i>0&&r[0]===rateKey);requests.push({updateCells:{start:{sheetId:p.config.gid_limites,rowIndex:i,columnIndex:0},rows:[{values:RATE_FIELDS.map(k=>cell(newRate[k]))}],fields:'userEnteredValue'}});}else append(p.config.gid_limites,RATE_FIELDS,newRate);
+  const link=p.config.frontend_url+'/#/convite?token='+hashes.candidate;
+  const text='Olá, '+input.apelido+'! '+(user.apelido||user.nome)+' convidou você para '+club.nome+'. Convite de '+(input.tipo==='ADMIN'?'administrador mensalista':input.tipo==='DIARISTA'?'diarista para '+input.data_jogo:'mensalista')+'. Abra seu convite: '+link;
+  return {...reply(201,'CONVITE_CRIADO','Convite registrado. Abra o WhatsApp para enviar.',{convite:present(invite),link_disponivel:true,link_convite:link,whatsapp_url:'https://wa.me/'+input.whatsapp+'?text='+encodeURIComponent(text)}),requests};
+ }catch{return deny(503,'CONVITES_INDISPONIVEIS','Não foi possível confirmar a operação. Confira o registro antes de repetir.');}
+}

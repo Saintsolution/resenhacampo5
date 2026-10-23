@@ -56,3 +56,7 @@ Nenhum workflow/Sheets foi alterado pela etapa A. Não há gravação ao avança
 O pacote de cadastro conjunto e dashboard está descrito em [README_PRIMEIRO_ACESSO.md](workflows/n8n/README_PRIMEIRO_ACESSO.md). O workflow 13 substitui o 09 na jornada de criação de conta e pelada. O envio conjunto e a consulta de sessão agora têm implementação local de backend; falta configurar/importar e validar no n8n. A URL final de bootstrap permanece dependente da configuração do ambiente.
 
 O fluxo atual do workflow 13 e da sessão 11 utiliza exclusivamente **PELADAS** para os dados da pelada; CONFIG permanece intacta. O cadastro gera os IDs e grava os vínculos de OWNER e pelada no mesmo lote.
+
+### Convites no painel real
+
+O painel agora oferece **Convidar jogador** e a lista de convites. Importação dos workflows 14–16 e teste pelo WhatsApp: [README_CONVITES.md](workflows/n8n/README_CONVITES.md). A abertura pública `/#/convite?token=...` valida o convite e mostra seus dados; inscrição/e-mail/cobrança são a etapa seguinte.
