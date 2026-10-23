@@ -1,0 +1,119 @@
+// Resenha Campo 5 — diagnóstico isolado, referência n8n 2.17.5.
+// Não usa $input, credenciais, rede, disco, ambiente ou dados reais.
+// Nenhuma instalação, fallback de algoritmo ou modificação de configuração.
+const report = {
+  probe_version: 1,
+  target_n8n_version: '2.17.5',
+  version_source: 'confirmed_by_operator_not_detected_by_probe',
+  fictitious_data_only: true,
+  crypto: { available: false, passed: false },
+  password_algorithms: [],
+  ready_for_next_review: false,
+  authentication_approved: false,
+};
+function loadModule(name) {
+  try { return require(name); } catch { return null; }
+}
+function measureStart() { return Date.now(); }
+function elapsed(start) { return Math.max(0, Date.now() - start); }
+const crypto = loadModule('crypto');
+if (crypto) {
+  report.crypto.available = true;
+  try {
+    const first = crypto.randomBytes(32).toString('hex');
+    const second = crypto.randomBytes(32).toString('hex');
+    const sha = value => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+    const digest = sha(first);
+    const checks = {
+      token_format: /^[a-f0-9]{64}$/.test(first) && /^[a-f0-9]{64}$/.test(second),
+      sample_tokens_differ: first !== second,
+      sha256_known_vector: sha('abc') === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      digest_format: /^[a-f0-9]{64}$/.test(digest),
+      digest_repeatable: digest === sha(first),
+      digest_changes_with_token: digest !== sha(second),
+    };
+    report.crypto = { available: true, passed: Object.values(checks).every(value => value === true), random_source: 'crypto.randomBytes', token_bits: 256, checks };
+  } catch {
+    report.crypto = { available: true, passed: false, reason: 'probe_failed_without_sensitive_details' };
+  }
+} else report.crypto.reason = 'module_absent_or_not_allowed';
+
+// Valores artificiais definidos aqui; nunca aceitar senha ou token de entrada.
+const password = 'SOMENTE-TESTE-ResenhaCampo5-2026!';
+const wrong = 'ERRADA-SOMENTE-TESTE-ResenhaCampo5!';
+const argon2 = loadModule('argon2');
+if (!argon2) {
+  report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: false, passed: false, reason: 'module_absent_or_not_allowed' });
+} else {
+  try {
+    if (argon2.argon2id !== 2 || typeof argon2.hash !== 'function' || typeof argon2.verify !== 'function') throw new Error('unsupported_api');
+    const params = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1, hashLength: 32 };
+    const timings = {};
+    let start = measureStart();
+    const first = await argon2.hash(password, params);
+    timings.hash_first_ms = elapsed(start);
+    start = measureStart();
+    const second = await argon2.hash(password, params);
+    timings.hash_second_ms = elapsed(start);
+    start = measureStart();
+    const correct = await argon2.verify(first, password);
+    timings.verify_correct_ms = elapsed(start);
+    start = measureStart();
+    const incorrect = await argon2.verify(first, wrong);
+    timings.verify_incorrect_ms = elapsed(start);
+    const a = first.split('$');
+    const b = second.split('$');
+    const phcValid = parts => parts.length === 6 && parts[1] === 'argon2id' && parts[2] === 'v=19' && parts[3] === 'm=19456,t=2,p=1' && /^[A-Za-z0-9+/]{22,}$/.test(parts[4]) && /^[A-Za-z0-9+/]{43}$/.test(parts[5]);
+    const checks = {
+      correct_password: correct === true,
+      wrong_password_rejected: incorrect === false,
+      parameters_and_format: phcValid(a) && phcValid(b),
+      independent_salts: a[4] !== b[4],
+      hashes_differ: first !== second,
+    };
+    report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: true, passed: Object.values(checks).every(value => value === true), parameters: { memory_kib: 19456, time_cost: 2, parallelism: 1, hash_bytes: 32 }, checks, timings });
+  } catch {
+    report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: true, passed: false, reason: 'probe_failed_without_sensitive_details' });
+  }
+}
+
+// Verifica as duas bibliotecas separadamente. Não presume que uma dependência
+// do processo principal esteja presente ou permitida no task runner.
+for (const name of ['bcrypt', 'bcryptjs']) {
+  const bcrypt = loadModule(name);
+  if (!bcrypt) {
+    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: false, passed: false, reason: 'module_absent_or_not_allowed' });
+    continue;
+  }
+  try {
+    if (typeof bcrypt.hash !== 'function' || typeof bcrypt.compare !== 'function' || typeof bcrypt.getRounds !== 'function') throw new Error('unsupported_api');
+    const cost = 12;
+    const timings = {};
+    let start = measureStart();
+    const first = await bcrypt.hash(password, cost);
+    timings.hash_first_ms = elapsed(start);
+    start = measureStart();
+    const second = await bcrypt.hash(password, cost);
+    timings.hash_second_ms = elapsed(start);
+    start = measureStart();
+    const correct = await bcrypt.compare(password, first);
+    timings.verify_correct_ms = elapsed(start);
+    start = measureStart();
+    const incorrect = await bcrypt.compare(wrong, first);
+    timings.verify_incorrect_ms = elapsed(start);
+    const encoded = value => /^\$2[aby]\$12\$[./A-Za-z0-9]{53}$/.test(value);
+    const checks = {
+      correct_password: correct === true,
+      wrong_password_rejected: incorrect === false,
+      parameters_and_format: encoded(first) && encoded(second) && bcrypt.getRounds(first) === cost && bcrypt.getRounds(second) === cost,
+      independent_salts: first.slice(7, 29) !== second.slice(7, 29),
+      hashes_differ: first !== second,
+    };
+    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: true, passed: Object.values(checks).every(value => value === true), parameters: { cost, max_input_bytes_for_future_implementation: 72 }, checks, timings });
+  } catch {
+    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: true, passed: false, reason: 'probe_failed_without_sensitive_details' });
+  }
+}
+report.ready_for_next_review = report.crypto.passed === true && report.password_algorithms.some(item => item.passed === true);
+// Resultado apenas sanitizado; não é autorização para implementar ou publicar login.
+return [{ json: report }];

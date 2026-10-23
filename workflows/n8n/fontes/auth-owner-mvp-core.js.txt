@@ -1,0 +1,153 @@
+// Resenha Campo 5: compatibilidade SHA256 legada solicitada. Limitação de senha documentada.
+// Sem imports, require, rede, logs ou implementação de primitivas criptográficas.
+// Hashes/randômicos são fornecidos pelos nós Crypto nativos, SOMENTE para fixtures.
+const PLAYER_FIELDS = ['participante_id','pelada_id','nome','apelido','cpf','telefone','email','categoria','papel_administrativo','situacao','asaas_customer_id','convidado_por_id','convidado_por_nome','criado_em','atualizado_em','senha_hash','token_sessao_hash','token_expira'];
+const TOKEN_FIELDS = ['token_hash','tipo_usuario','id_usuario','finalidade','expira_em','utilizado_em'];
+const RATE_FIELDS = ['chave','acao','janela_inicio','contador','bloqueado_ate'];
+function reply(status, codigo, mensagem, extra = {}) {
+  return { status, response: { sucesso: status < 400, codigo, mensagem, modo: 'MVP_LEGADO', ...extra }, requests: [], mail: null };
+}
+function digits(value) { return String(value ?? '').replace(/\D/g, ''); }
+function validCpf(cpf) {
+  if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false;
+  function digit(base) {
+    let sum = 0;
+    for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (base.length + 1 - i);
+    const rest = sum % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  }
+  return digit(cpf.slice(0, 9)) === Number(cpf[9]) && digit(cpf.slice(0, 10)) === Number(cpf[10]);
+}
+function prepare(action, request, config) {
+  const blocked = reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração dos webhooks no n8n.');
+  if (!config.pelada_id || !/^https:\/\//.test(config.origem) || config.origem.includes('CONFIGURAR_') || [config.gid_jogadores,config.gid_tokens,config.gid_limites].some(id=>!Number.isInteger(id)||id<0)) return {...blocked,canRun:false};
+  const headers = Object.fromEntries(Object.entries(request.headers ?? {}).map(([k,v]) => [k.toLowerCase(),v]));
+  // O Header Auth gerenciado protege antes deste nó. Origem nunca concede identidade.
+  if (headers.origin && headers.origin !== config.origem) return { ...reply(403,'ORIGEM_INVALIDA','Origem não autorizada.'), canRun:false };
+  const body = request.body ?? {};
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ...reply(400,'DADOS_INVALIDOS','Formato inválido.'), canRun:false };
+  if (['cadastro_owner','login','primeiro_acesso','recuperar_senha'].includes(action)) {
+    const cpf = digits(body.cpf ?? body.cpf_assoc);
+    if (!validCpf(cpf) || (body.cpf != null && body.cpf_assoc != null && digits(body.cpf) !== digits(body.cpf_assoc))) return { ...reply(400,'DADOS_INVALIDOS','Informe os dados de acesso válidos.'), canRun:false };
+  }
+  const password = String(body.senha ?? body.nova_senha ?? '');
+  if (['cadastro_owner','login','criar_senha','redefinir_senha'].includes(action) && (password.length < (action === 'login' ? 1 : 8) || password.length > 128)) return { ...reply(400,'DADOS_INVALIDOS','Senha fora dos limites permitidos para o teste.'), canRun:false };
+  let profile = null;
+  if(action==='cadastro_owner') {
+    if(typeof body.senha!=='string' || body.senha!==body.confirmacao_senha || typeof body.nome!=='string' || body.nome.trim().split(/\s+/).length<2 || body.nome.length>150 || typeof body.email!=='string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email) || body.email.length>254 || typeof body.telefone!=='string' || !/^\d{10,13}$/.test(digits(body.telefone))) return {...reply(400,'DADOS_INVALIDOS','Confira nome completo, CPF, e-mail, telefone e confirmação da senha.'),canRun:false};
+    profile={nome:body.nome.trim(),email:body.email.trim().toLowerCase(),telefone:digits(body.telefone)};
+  }
+  const bearer = String(headers.authorization ?? '').match(/^Bearer ([a-fA-F0-9]{64})$/);
+  const token = ['sessao','logout'].includes(action) ? (bearer?.[1] ?? '') : String(body.token ?? '').trim();
+  if (['criar_senha','redefinir_senha','sessao'].includes(action) && !/^[a-fA-F0-9]{64}$/.test(token)) return { ...reply(action === 'sessao' ? 401 : 400,'TOKEN_INVALIDO','Token ausente ou inválido.'), canRun:false };
+  return { canRun:true, action, config, cpf:digits(body.cpf ?? body.cpf_assoc), password, token, profile };
+}
+function plan(prepared, snapshot, hashes, nowMs) {
+  const now = new Date(nowMs).toISOString();
+  const config = prepared.config;
+  const action = prepared.action;
+  const output = reply(503,'DADOS_INCOMPATIVEIS','Estrutura de homologação indisponível.');
+  try {
+    if (!prepared.canRun) return output;
+    function table(index, name, required, gid) {
+      const raw = snapshot.valueRanges?.[index];
+      if (!raw || !String(raw.range ?? '').replace(/'/g, '').startsWith(name + '!')) throw new Error('schema');
+      const values = raw.values ?? [];
+      const header = values[0] ?? [];
+      if (required.some(key => !header.includes(key)) || new Set(header).size !== header.length || values.length > 5001) throw new Error('schema');
+      return { header, gid, rows: values.slice(1).map((cells,i) => ({ index:i + 1, values:Object.fromEntries(header.map((key,col) => [key,cells[col] ?? ''])) })).filter(row => Object.values(row.values).some(value => value !== '')) };
+    }
+    const players = table(0,'JOGADORES',PLAYER_FIELDS,config.gid_jogadores);
+    const tokens = table(1,'TOKENS_ACESSO',TOKEN_FIELDS,config.gid_tokens);
+    const rates = table(2,'LIMITES_AUTH',RATE_FIELDS,config.gid_limites);
+    const scope = players.rows.filter(row => row.values.pelada_id === config.pelada_id);
+    if (new Set(scope.map(row => row.values.participante_id)).size !== scope.length || new Set(scope.map(row => digits(row.values.cpf))).size !== scope.length) throw new Error('duplicate_identity');
+    const requests = [];
+    function cell(value) { return { userEnteredValue:typeof value === 'number' ? {numberValue:value} : {stringValue:String(value ?? '')} }; }
+    function update(tab,row,values) {
+      for (const [key,value] of Object.entries(values)) {
+        const col = tab.header.indexOf(key);
+        if (col < 0) throw new Error('schema');
+        requests.push({ updateCells:{start:{sheetId:tab.gid,rowIndex:row.index,columnIndex:col},rows:[{values:[cell(value)]}],fields:'userEnteredValue'} });
+      }
+    }
+    function append(tab,values) { requests.push({appendCells:{sheetId:tab.gid,rows:[{values:tab.header.map(key => cell(values[key] ?? ''))}],fields:'userEnteredValue'}}); }
+    const live = row => String(row.values.utilizado_em ?? '').trim() === '' && Number.isFinite(Date.parse(row.values.expira_em)) && Date.parse(row.values.expira_em) > nowMs;
+    const finish = response => ({ ...response,requests,mail:response.mail ?? null });
+    // Limite GLOBAL por ação, persistente na cópia de teste. Não é defesa pública por IP.
+    function limit(key,max) {
+      const matching = rates.rows.filter(row => row.values.chave === key);
+      if (matching.length > 1) throw new Error('duplicate_limit');
+      const row = matching[0];
+      const start = row ? Date.parse(row.values.janela_inicio) : NaN;
+      const inWindow = Number.isFinite(start) && start <= nowMs && nowMs - start < 900000;
+      const count = inWindow ? Number(row.values.contador) : 0;
+      if (!Number.isInteger(count) || count < 0) throw new Error('invalid_limit');
+      if (count >= max) return false;
+      const values = {chave:key,acao:action,janela_inicio:inWindow ? row.values.janela_inicio : now,contador:count+1,bloqueado_ate:count+1 >= max ? new Date((inWindow ? start : nowMs)+900000).toISOString() : ''};
+      if (row) update(rates,row,values); else append(rates,values);
+      return true;
+    }
+    if (!limit('MVP_GLOBAL:'+action,30)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));
+    const player = scope.find(row => digits(row.values.cpf) === prepared.cpf);
+    const eligible = row => row && row.values.situacao === 'ativo';
+    const credentialFailure = () => finish(reply(401,'CREDENCIAIS_INVALIDAS','Não foi possível validar o acesso.'));
+    const shaFormat = value => /^[a-f0-9]{64}$/i.test(String(value ?? ''));
+    if(action==='cadastro_owner') {
+      if(players.rows.some(row=>String(row.values.papel_administrativo).trim().toUpperCase()==='OWNER')) return finish(reply(409,'OWNER_JA_EXISTE','O organizador já foi cadastrado. Faça login.'));
+      if(player) return finish(reply(409,'CADASTRO_EXISTENTE','Já existe um cadastro para esses dados.'));
+      if(!shaFormat(hashes.passwordHash)||!shaFormat(hashes.candidate)) throw new Error('native_crypto');
+      // Mesmo ID de named range em todas as tentativas: inclusão no mesmo lote do OWNER.
+      requests.push({addNamedRange:{namedRange:{namedRangeId:'rc5_owner_bootstrap_v1',name:'RC5_OWNER_CADASTRADO',range:{sheetId:config.gid_jogadores,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});
+      append(players,{...prepared.profile,participante_id:'OWNER_'+hashes.candidate,pelada_id:config.pelada_id,cpf:prepared.cpf,apelido:prepared.profile.nome.split(/\s+/)[0],categoria:'',papel_administrativo:'OWNER',situacao:'ativo',criado_em:now,atualizado_em:now,senha_hash:hashes.passwordHash});
+      return finish(reply(201,'OWNER_CADASTRADO','Organizador cadastrado. Entre com seu CPF e senha.',{proxima_acao:'login'}));
+    }
+    if (action === 'login') {
+      if (player && !limit('MVP_LOGIN:'+player.values.participante_id,5)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));
+      if (!eligible(player) || !shaFormat(hashes.passwordHash) || !shaFormat(player.values.senha_hash) || player.values.senha_hash !== hashes.passwordHash) return credentialFailure();
+      if (!shaFormat(hashes.candidate) || !shaFormat(hashes.candidateHash)) throw new Error('native_crypto');
+      const expires = new Date(nowMs+28800000).toISOString();
+      update(players,player,{token_sessao_hash:hashes.candidateHash,token_expira:expires,atualizado_em:now});
+      return finish(reply(200,'LOGIN_AUTORIZADO','Acesso autorizado.',{autenticado:true,token_sessao:hashes.candidate,expira_em:expires,participante_id:player.values.participante_id}));
+    }
+    if (action === 'sessao' || action === 'logout') {
+      const found = prepared.token ? scope.filter(row => row.values.token_sessao_hash && row.values.token_sessao_hash === hashes.tokenHash) : [];
+      if (found.length > 1) throw new Error('duplicate_session');
+      const row = found[0];
+      if (action === 'logout') {
+        if (row) update(players,row,{token_sessao_hash:'',token_expira:'',atualizado_em:now});
+        return finish(reply(200,'SESSAO_REVOGADA','Sessão encerrada.',{autenticado:false}));
+      }
+      if (!eligible(row) || !Number.isFinite(Date.parse(row.values.token_expira)) || Date.parse(row.values.token_expira) <= nowMs) return credentialFailure();
+      return finish(reply(200,'SESSAO_VALIDA','Sessão válida.',{autenticado:true,participante_id:row.values.participante_id,nome:row.values.nome,categoria:row.values.categoria,papel_administrativo:row.values.papel_administrativo,expira_em:row.values.token_expira}));
+    }
+    if (action === 'primeiro_acesso' || action === 'recuperar_senha') {
+      const generic = reply(202,'SOLICITACAO_RECEBIDA','Se houver cadastro elegível, as instruções serão encaminhadas.');
+      if (!eligible(player) || (action === 'primeiro_acesso' ? String(player.values.senha_hash).trim() !== '' : String(player.values.senha_hash).trim() === '')) return finish(generic);
+      const purpose = action === 'primeiro_acesso' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';
+      const related = tokens.rows.filter(row => row.values.id_usuario === player.values.participante_id && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);
+      if (action === 'primeiro_acesso' && related.some(live)) return finish(generic);
+      if (!shaFormat(hashes.candidateHash) || !shaFormat(hashes.candidate)) throw new Error('native_crypto');
+      for (const row of related.filter(row => String(row.values.utilizado_em).trim() === '')) update(tokens,row,{utilizado_em:now});
+      append(tokens,{token_hash:hashes.candidateHash,tipo_usuario:'JOGADOR',id_usuario:player.values.participante_id,finalidade:purpose,expira_em:new Date(nowMs+(purpose === 'CRIAR_SENHA' ? 1800000 : 900000)).toISOString(),utilizado_em:''});
+      // Endereços .invalid são deliberadamente não entregáveis. Trocar somente em revisão futura.
+      generic.mail = {to:player.values.email,subject:'Resenha Campo 5 — TESTE FICTÍCIO',text:'Somente ensaio estrutural. '+config.origem+(purpose === 'CRIAR_SENHA' ? '/criar-senha' : '/redefinir-senha')+'#token='+hashes.candidate};
+      return finish(generic);
+    }
+    if (action === 'criar_senha' || action === 'redefinir_senha') {
+      const purpose = action === 'criar_senha' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';
+      const matching = tokens.rows.filter(row => row.values.token_hash === hashes.tokenHash && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);
+      if (matching.length !== 1 || !live(matching[0])) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));
+      const row = scope.find(candidate => candidate.values.participante_id === matching[0].values.id_usuario);
+      if (!eligible(row) || (action === 'criar_senha' && String(row.values.senha_hash).trim() !== '')) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));
+      if (!shaFormat(hashes.passwordHash)) throw new Error('native_crypto');
+      update(players,row,{senha_hash:hashes.passwordHash,token_sessao_hash:'',token_expira:'',atualizado_em:now});
+      for (const tokenRow of tokens.rows.filter(item => item.values.id_usuario === row.values.participante_id && ['CRIAR_SENHA','REDEFINIR_SENHA'].includes(item.values.finalidade) && String(item.values.utilizado_em).trim() === '')) update(tokens,tokenRow,{utilizado_em:now});
+      return finish(reply(200,'SENHA_FICTICIA_DEFINIDA','Senha de teste definida; nenhuma sessão foi iniciada.',{proxima_acao:'login'}));
+    }
+    return finish(reply(400,'ACAO_INVALIDA','Ação não reconhecida.'));
+  } catch {
+    // Nenhum corpo de requisição, segredo ou mensagem de biblioteca é refletido.
+    return output;
+  }
+}

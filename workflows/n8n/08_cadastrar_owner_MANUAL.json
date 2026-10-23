@@ -1,0 +1,178 @@
+{
+  "name": "RC5 — cadastro manual OWNER inicial",
+  "nodes": [
+    {
+      "name": "Executar manualmente",
+      "id": "613fd685-9e23-45c6-8f38-c8f0901e017c",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Dados do OWNER",
+      "id": "99534142-5876-42c7-8567-ae3823d0d73f",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Preencher apenas no editor local do n8n; não salvar dados pessoais no Git.\n// Não incluir senha. Executar manualmente uma vez, sem escritores concorrentes.\nconst config = {\n spreadsheet_id: '1dRBMU7BH9PLzWjgAjj4VWnLUqpSVIWC6iKQj9URczMo',\n participante_id: 'CONFIGURAR_ID_OWNER',\n pelada_id: 'CONFIGURAR_PELADA_ID_EXISTENTE',\n nome: 'Ricardo',\n apelido: 'Ricardo',\n cpf: 'CONFIGURAR_CPF',\n telefone: 'CONFIGURAR_TELEFONE',\n email: 'CONFIGURAR_EMAIL'\n};\nconst cpf = String(config.cpf).replace(/\\D/g, '');\nfunction valid(cpf) {\n if (!/^\\d{11}$/.test(cpf) || /^(\\d)\\1{10}$/.test(cpf)) return false;\n for (let n=9;n<=10;n++) {\n  let sum=0; for(let i=0;i<n;i++) sum+=Number(cpf[i])*(n+1-i);\n  const rest=sum%11; if(Number(cpf[n]) !== (rest<2?0:11-rest)) return false;\n }\n return true;\n}\nif(Object.values(config).some(v=>!String(v).trim() || String(v).includes('CONFIGURAR_')) || !valid(cpf) || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(config.email) || !/^\\+?[\\d ()-]{10,20}$/.test(config.telefone)) throw new Error('Preencha os dados administrativos válidos; nenhum registro foi enviado.');\nreturn [{json:{...config,cpf,email:config.email.trim().toLowerCase()}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [
+        280,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Sem senha. Preencher dados reais apenas no n8n. Não publicar/exportar preenchido."
+    },
+    {
+      "name": "Ler JOGADORES",
+      "id": "a4ae77ef-71b6-4ea7-8b69-6beea4297ede",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Dados do OWNER').first().json.spreadsheet_id + '/values/JOGADORES!A:R' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "position": [
+        560,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE"
+        }
+      }
+    },
+    {
+      "name": "Validar cadastro único",
+      "id": "3675d5c8-00cc-4ba4-90df-d266258f90cd",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const cfg = $('Dados do OWNER').first().json;\nconst rows = $input.first().json.values;\nconst fields = [\"participante_id\", \"pelada_id\", \"nome\", \"apelido\", \"cpf\", \"telefone\", \"email\", \"categoria\", \"papel_administrativo\", \"situacao\", \"asaas_customer_id\", \"convidado_por_id\", \"convidado_por_nome\", \"criado_em\", \"atualizado_em\", \"senha_hash\", \"token_sessao_hash\", \"token_expira\"];\nif(!Array.isArray(rows) || fields.some((f,i)=>rows[0]?.[i]!==f)) throw new Error('Cabeçalhos de JOGADORES incompatíveis; nenhuma gravação.');\nconst records = rows.slice(1).filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(fields.map((f,i)=>[f,String(r[i]??'')])));\nconst same = records.filter(r=>r.participante_id===cfg.participante_id || (r.pelada_id===cfg.pelada_id && r.cpf.replace(/\\D/g,'')===cfg.cpf));\nif(same.length) throw new Error('Identidade já cadastrada ou conflitante. Nenhuma alteração; conferir no Sheets antes de repetir.');\nif(records.some(r=>r.papel_administrativo.trim().toUpperCase()==='OWNER')) throw new Error('Já existe OWNER. Nenhuma alteração automática de titularidade.');\nconst now=new Date().toISOString();\nconst row={...cfg,categoria:'',papel_administrativo:'OWNER',situacao:'ativo',criado_em:now,atualizado_em:now};\nreturn [{json:{values:[fields.map(f=>row[f]??'')]}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [
+        840,
+        0
+      ]
+    },
+    {
+      "name": "Cadastrar OWNER",
+      "id": "13a80a93-1e48-4e5e-8180-c0e2468a8e29",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Dados do OWNER').first().json.spreadsheet_id + '/values/JOGADORES!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { values: $json.values } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE"
+        }
+      }
+    },
+    {
+      "name": "Confirmar sem dados pessoais",
+      "id": "fa145f24-5bf3-4143-825b-d51a0c950934",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r=$input.first().json; if(r.updates?.updatedRows!==1) throw new Error('Resultado indeterminado. Conferir Sheets antes de repetir.'); return [{json:{sucesso:true,codigo:'OWNER_CADASTRADO',papel_administrativo:'OWNER',senha_definida:false,proxima_etapa:'PRIMEIRO_ACESSO',mensagem:'OWNER cadastrado. Login ainda não habilitado.'}}];"
+      },
+      "position": [
+        1400,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Dados do OWNER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados do OWNER": {
+      "main": [
+        [
+          {
+            "node": "Ler JOGADORES",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler JOGADORES": {
+      "main": [
+        [
+          {
+            "node": "Validar cadastro único",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar cadastro único": {
+      "main": [
+        [
+          {
+            "node": "Cadastrar OWNER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cadastrar OWNER": {
+      "main": [
+        [
+          {
+            "node": "Confirmar sem dados pessoais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "pinData": {}
+}

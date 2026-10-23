@@ -1,0 +1,82 @@
+// Estrutura real de PELADAS. CONFIG não é lida nem alterada por este fluxo.
+const PELADA_FIELDS=['pelada_id','nome','local','dia_semana','hora_inicio','hora_fim','mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso','vencimento_dia','convite_horas','owner_id','situacao'];
+function peladaValid(p) {
+ return p && ['nome','local','cidade'].every(k=>typeof p[k]==='string' && p[k].trim().length>0 && p[k].length<=150)
+ && Number.isInteger(p.dia_semana) && p.dia_semana>=0 && p.dia_semana<=6
+ && ['horario_inicio','horario_fim'].every(k=>typeof p[k]==='string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(p[k])) && p.horario_fim>p.horario_inicio
+ && ['mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso'].every(k=>typeof p[k]==='number' && Number.isFinite(p[k]) && p[k]>=0 && p[k]<=100000 && Math.abs(p[k]*100-Math.round(p[k]*100))<0.000001)
+ && Number.isInteger(p.vencimento_mensal) && p.vencimento_mensal>=1 && p.vencimento_mensal<=28
+ && Number.isInteger(p.validade_convite_horas) && p.validade_convite_horas>=1 && p.validade_convite_horas<=720;
+}
+function readTable(snapshot,index,name,fields) {
+ const t=snapshot.valueRanges?.[index];const values=t?.values;
+ if(!t || !String(t.range??'').replace(/'/g,'').startsWith(name+'!') || !Array.isArray(values) || fields.some((k,i)=>values[0]?.[i]!==k) || values.length>5001) throw new Error('schema');
+ return values.slice(1).filter(r=>r.some(v=>String(v??'').trim())).map(r=>Object.fromEntries(fields.map((k,i)=>[k,r[i]??''])));
+}
+function localComCidade(p) {return p.local.toLowerCase().includes(p.cidade.trim().toLowerCase())?p.local.trim():p.local.trim()+' — '+p.cidade.trim();}
+function peladaValues(p,id,owner) {
+ return {pelada_id:id,nome:p.nome.trim(),local:localComCidade(p),dia_semana:p.dia_semana,hora_inicio:p.horario_inicio,hora_fim:p.horario_fim,mensalidade:p.mensalidade,diaria_sem_colete:p.diaria_sem_colete,diaria_com_colete:p.diaria_com_colete,colete_avulso:p.colete_avulso,vencimento_dia:p.vencimento_mensal,convite_horas:p.validade_convite_horas,owner_id:owner,situacao:'ativo'};
+}
+function readPelada(row) {
+ const p={id:row.pelada_id,nome:row.nome,local:row.local,cidade:'',dia_semana:Number(row.dia_semana),horario_inicio:row.hora_inicio,horario_fim:row.hora_fim,mensalidade:Number(row.mensalidade),diaria_sem_colete:Number(row.diaria_sem_colete),diaria_com_colete:Number(row.diaria_com_colete),colete_avulso:Number(row.colete_avulso),vencimento_mensal:Number(row.vencimento_dia),validade_convite_horas:Number(row.convite_horas)};
+ if(!peladaValid({...p,cidade:'cidade no local'}) || row.situacao!=='ativo')throw new Error('pelada_invalid');
+ return p;
+}
+function prepareBootstrap(request,config) {
+  const body=request.body;
+  const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
+  const key=String(headers['idempotency-key']??'');
+  const bad=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados do organizador e da pelada.'),canRun:false});
+  if(!body || typeof body!=='object' || !body.organizador || !peladaValid(body.pelada) || !/^[a-f0-9-]{36}$/i.test(key)) return bad();
+  const o=body.organizador;
+  if(!['','Mensalista','Diarista'].includes(o.categoria??'') || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40) return bad();
+  const p=prepare('cadastro_owner',{...request,body:o},config);
+  if(!Number.isInteger(config.gid_peladas)||config.gid_peladas<0) return {...reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração da planilha.'),canRun:false};
+  return {...p,profile:p.profile?{...p.profile,apelido:o.apelido.trim(),categoria:o.categoria??''}:null,pelada:body.pelada,requestId:key};
+}
+function planBootstrap(prepared,snapshot,hashes,nowMs) {
+ try {
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);
+  if(!Array.isArray(snapshot.namedRanges))throw new Error('metadata');
+  const marker=snapshot.namedRanges.find(r=>r.namedRangeId==='rc5_owner_bootstrap_v1');
+  const expectedMarker='RC5_OWNER_'+prepared.requestId.replace(/-/g,'_');
+  const owners=players.filter(r=>String(r.papel_administrativo).trim().toUpperCase()==='OWNER');
+  if(owners.length || clubs.length || marker) {
+   const owner=owners[0];const club=clubs[0];
+   const paired=owners.length===1 && clubs.length===1 && owner.pelada_id===club.pelada_id && club.owner_id===owner.participante_id;
+   if(!paired)return reply(503,'CADASTRO_INCONSISTENTE','Confira o cadastro existente antes de repetir. Nenhum registro foi alterado.');
+   const wanted=peladaValues(prepared.pelada,club.pelada_id,owner.participante_id);
+   const same=marker?.name===expectedMarker && digits(owner.cpf)===prepared.cpf && owner.senha_hash===hashes.passwordHash && ['nome','email','telefone','apelido','categoria'].every(k=>owner[k]===prepared.profile[k]) && Object.entries(wanted).every(([k,v])=>String(club[k])===String(v));
+   return same?reply(200,'PELADA_CRIADA','Conta e pelada já foram criadas.',{proxima_acao:'login',participante_id:owner.participante_id,pelada_id:club.pelada_id}):reply(409,'OWNER_JA_EXISTE','O organizador e a pelada já foram cadastrados. Faça login.');
+  }
+  const peladaId='PELADA_'+hashes.candidate;
+  const result=plan({...prepared,config:{...prepared.config,pelada_id:peladaId}},snapshot,hashes,nowMs);
+  if(result.status!==201)return result;
+  const append=result.requests.find(r=>r.appendCells?.sheetId===prepared.config.gid_jogadores);
+  const claim=result.requests.find(r=>r.addNamedRange);
+  if(!append || !claim)throw new Error('owner_plan');
+  const ownerId='OWNER_'+hashes.candidate;
+  const cell=v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v??'')}});
+  append.appendCells.rows[0].values[PLAYER_FIELDS.indexOf('apelido')]=cell(prepared.profile.apelido);
+  append.appendCells.rows[0].values[PLAYER_FIELDS.indexOf('categoria')]=cell(prepared.profile.categoria);
+  claim.addNamedRange.namedRange.name=expectedMarker;
+  const club=peladaValues(prepared.pelada,peladaId,ownerId);
+  result.requests.push({appendCells:{sheetId:prepared.config.gid_peladas,rows:[{values:PELADA_FIELDS.map(k=>cell(club[k]))}],fields:'userEnteredValue'}});
+  return {...result,status:201,response:{sucesso:true,codigo:'PELADA_CRIADA',mensagem:'Conta e pelada criadas. Entre com CPF e senha.',proxima_acao:'login',participante_id:ownerId,pelada_id:peladaId,modo:'MVP_LEGADO'}};
+ }catch{return reply(503,'DADOS_INCOMPATIVEIS','Não foi possível confirmar o cadastro conjunto. Confira JOGADORES e PELADAS antes de repetir.');}
+}
+function planSession(prepared,snapshot,hashes,nowMs) {
+ const result=plan(prepared,snapshot,hashes,nowMs);
+ if(result.status!==200 || !result.response.autenticado)return result;
+ try {
+  if(result.response.papel_administrativo!=='OWNER')return reply(403,'ACESSO_RESTRITO','Este painel é exclusivo do organizador.');
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const owners=players.filter(r=>r.participante_id===result.response.participante_id);
+  if(owners.length!==1)throw new Error('owner');
+  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS).filter(r=>r.pelada_id===owners[0].pelada_id && r.owner_id===owners[0].participante_id);
+  if(clubs.length!==1)throw new Error('club');
+  const p=readPelada(clubs[0]);
+  return {...result,response:{...result.response,pelada:p,total_jogadores:players.filter(r=>r.pelada_id===p.id && ['MENSALISTA','DIARISTA'].includes(String(r.categoria).toUpperCase()) && r.situacao==='ativo').length}};
+ }catch{return reply(503,'PELADA_INDISPONIVEL','Não foi possível carregar a pelada vinculada ao organizador.');}
+}

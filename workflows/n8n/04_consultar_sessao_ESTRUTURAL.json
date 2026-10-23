@@ -1,0 +1,570 @@
+{
+  "name": "Resenha Campo 5 — sessao — BLOQUEADO / dados fictícios",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "rc5-auth-ficticia-v1/sessao",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "CONFIGURAR_ORIGEM_FRONTEND_HML"
+        }
+      },
+      "id": "0d16a3b9-1731-5490-a06e-d1cd19705b5b",
+      "name": "Webhook de ensaio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_CREDENCIAL_WEBHOOK_HML",
+          "name": "CONFIGURAR_CREDENCIAL_WEBHOOK_HML"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resenha Campo 5: motor ESTRUTURAL de teste. Não é autenticação pública.\n// Sem imports, require, rede, logs ou implementação de primitivas criptográficas.\n// Hashes/randômicos são fornecidos pelos nós Crypto nativos, SOMENTE para fixtures.\nconst PLAYER_FIELDS = ['participante_id','pelada_id','nome','apelido','cpf','telefone','email','categoria','papel_administrativo','situacao','asaas_customer_id','convidado_por_id','convidado_por_nome','criado_em','atualizado_em','senha_hash','token_sessao_hash','token_expira'];\nconst TOKEN_FIELDS = ['token_hash','tipo_usuario','id_usuario','finalidade','expira_em','utilizado_em'];\nconst RATE_FIELDS = ['chave','acao','janela_inicio','contador','bloqueado_ate'];\nfunction reply(status, codigo, mensagem, extra = {}) {\n  return { status, response: { sucesso: status < 400, codigo, mensagem, modo: 'TESTE_FICTICIO', ...extra }, requests: [], mail: null };\n}\nfunction digits(value) { return String(value ?? '').replace(/\\D/g, ''); }\nfunction validCpf(cpf) {\n  if (!/^\\d{11}$/.test(cpf) || /^(\\d)\\1{10}$/.test(cpf)) return false;\n  function digit(base) {\n    let sum = 0;\n    for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (base.length + 1 - i);\n    const rest = sum % 11;\n    return rest < 2 ? 0 : 11 - rest;\n  }\n  return digit(cpf.slice(0, 9)) === Number(cpf[9]) && digit(cpf.slice(0, 10)) === Number(cpf[10]);\n}\nfunction prepare(action, request, config) {\n  const blocked = reply(503, 'HOMOLOGACAO_BLOQUEADA', 'Autenticação pública não aprovada; dependências pendentes.');\n  const flags = ['revisao_limite_sha256_ficticio','controle_escritor_unico_revisado','privacidade_e_logs_revisados','origem_e_credencial_hml_revisadas'];\n  if (config.modo !== 'TESTE_FICTICIO' || flags.some(key => config[key] !== true)) return { ...blocked, canRun: false };\n  if (!/^[A-Za-z0-9_-]{20,}$/.test(config.spreadsheet_id) || config.spreadsheet_id === '1dRBMU7BH9PLzWjgAjj4VWnLUqpSVIWC6iKQj9URczMo' || config.spreadsheet_id.startsWith('CONFIGURAR_')) return { ...blocked, canRun: false };\n  if (!/^TESTE_/.test(config.pelada_id) || !/^https:\\/\\//.test(config.origem) || config.origem.includes('CONFIGURAR_')) return { ...blocked, canRun: false };\n  if (new Set([config.gid_jogadores,config.gid_tokens,config.gid_limites]).size !== 3 || [config.gid_jogadores,config.gid_tokens,config.gid_limites].some(id => !Number.isInteger(id) || id < 0)) return { ...blocked, canRun: false };\n  const headers = Object.fromEntries(Object.entries(request.headers ?? {}).map(([k,v]) => [k.toLowerCase(),v]));\n  // O Header Auth gerenciado protege antes deste nó. Origem nunca concede identidade.\n  if (headers.origin && headers.origin !== config.origem) return { ...reply(403,'ORIGEM_INVALIDA','Origem não autorizada.'), canRun:false };\n  const body = request.body ?? {};\n  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ...reply(400,'DADOS_INVALIDOS','Formato inválido.'), canRun:false };\n  if (['login','primeiro_acesso','recuperar_senha'].includes(action)) {\n    const cpf = digits(body.cpf ?? body.cpf_assoc);\n    if (!validCpf(cpf) || (body.cpf != null && body.cpf_assoc != null && digits(body.cpf) !== digits(body.cpf_assoc))) return { ...reply(400,'DADOS_INVALIDOS','Informe os dados de acesso válidos.'), canRun:false };\n  }\n  const password = String(body.senha ?? body.nova_senha ?? '');\n  if (['login','criar_senha','redefinir_senha'].includes(action) && (password.length < (action === 'login' ? 1 : 8) || password.length > 128)) return { ...reply(400,'DADOS_INVALIDOS','Senha fora dos limites permitidos para o teste.'), canRun:false };\n  const bearer = String(headers.authorization ?? '').match(/^Bearer ([a-fA-F0-9]{64})$/);\n  const token = ['sessao','logout'].includes(action) ? (bearer?.[1] ?? '') : String(body.token ?? '').trim();\n  if (['criar_senha','redefinir_senha','sessao'].includes(action) && !/^[a-fA-F0-9]{64}$/.test(token)) return { ...reply(action === 'sessao' ? 401 : 400,'TOKEN_INVALIDO','Token ausente ou inválido.'), canRun:false };\n  return { canRun:true, action, config, cpf:digits(body.cpf ?? body.cpf_assoc), password, token };\n}\nfunction plan(prepared, snapshot, hashes, nowMs) {\n  const now = new Date(nowMs).toISOString();\n  const config = prepared.config;\n  const action = prepared.action;\n  const output = reply(503,'DADOS_INCOMPATIVEIS','Estrutura de homologação indisponível.');\n  try {\n    if (!prepared.canRun || config.modo !== 'TESTE_FICTICIO') return output;\n    function table(index, name, required, gid) {\n      const raw = snapshot.valueRanges?.[index];\n      if (!raw || !String(raw.range ?? '').replace(/'/g, '').startsWith(name + '!')) throw new Error('schema');\n      const values = raw.values ?? [];\n      const header = values[0] ?? [];\n      if (required.some(key => !header.includes(key)) || new Set(header).size !== header.length || values.length > 5001) throw new Error('schema');\n      return { header, gid, rows: values.slice(1).map((cells,i) => ({ index:i + 1, values:Object.fromEntries(header.map((key,col) => [key,cells[col] ?? ''])) })).filter(row => Object.values(row.values).some(value => value !== '')) };\n    }\n    const players = table(0,'JOGADORES',PLAYER_FIELDS,config.gid_jogadores);\n    const tokens = table(1,'TOKENS_ACESSO',TOKEN_FIELDS,config.gid_tokens);\n    const rates = table(2,'LIMITES_AUTH',RATE_FIELDS,config.gid_limites);\n    // Proteção adicional: rejeita TODA a cópia se houver qualquer identidade não fictícia.\n    if (players.rows.some(row => !String(row.values.participante_id).startsWith('TESTE_') || !String(row.values.pelada_id).startsWith('TESTE_') || !String(row.values.email).endsWith('.invalid'))) throw new Error('non_fixture');\n    if (tokens.rows.some(row => !String(row.values.id_usuario).startsWith('TESTE_'))) throw new Error('non_fixture');\n    const scope = players.rows.filter(row => row.values.pelada_id === config.pelada_id);\n    if (new Set(scope.map(row => row.values.participante_id)).size !== scope.length || new Set(scope.map(row => digits(row.values.cpf))).size !== scope.length) throw new Error('duplicate_identity');\n    const requests = [];\n    function cell(value) { return { userEnteredValue:typeof value === 'number' ? {numberValue:value} : {stringValue:String(value ?? '')} }; }\n    function update(tab,row,values) {\n      for (const [key,value] of Object.entries(values)) {\n        const col = tab.header.indexOf(key);\n        if (col < 0) throw new Error('schema');\n        requests.push({ updateCells:{start:{sheetId:tab.gid,rowIndex:row.index,columnIndex:col},rows:[{values:[cell(value)]}],fields:'userEnteredValue'} });\n      }\n    }\n    function append(tab,values) { requests.push({appendCells:{sheetId:tab.gid,rows:[{values:tab.header.map(key => cell(values[key] ?? ''))}],fields:'userEnteredValue'}}); }\n    const live = row => String(row.values.utilizado_em ?? '').trim() === '' && Number.isFinite(Date.parse(row.values.expira_em)) && Date.parse(row.values.expira_em) > nowMs;\n    const finish = response => ({ ...response,requests,mail:response.mail ?? null });\n    // Limite GLOBAL por ação, persistente na cópia de teste. Não é defesa pública por IP.\n    function limit(key,max) {\n      const matching = rates.rows.filter(row => row.values.chave === key);\n      if (matching.length > 1) throw new Error('duplicate_limit');\n      const row = matching[0];\n      const start = row ? Date.parse(row.values.janela_inicio) : NaN;\n      const inWindow = Number.isFinite(start) && start <= nowMs && nowMs - start < 900000;\n      const count = inWindow ? Number(row.values.contador) : 0;\n      if (!Number.isInteger(count) || count < 0) throw new Error('invalid_limit');\n      if (count >= max) return false;\n      const values = {chave:key,acao:action,janela_inicio:inWindow ? row.values.janela_inicio : now,contador:count+1,bloqueado_ate:count+1 >= max ? new Date((inWindow ? start : nowMs)+900000).toISOString() : ''};\n      if (row) update(rates,row,values); else append(rates,values);\n      return true;\n    }\n    if (!limit('TESTE_GLOBAL:'+action,30)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n    const player = scope.find(row => digits(row.values.cpf) === prepared.cpf);\n    const eligible = row => row && row.values.situacao === 'ativo';\n    const credentialFailure = () => finish(reply(401,'CREDENCIAIS_INVALIDAS','Não foi possível validar o acesso.'));\n    const shaFormat = value => /^[a-f0-9]{64}$/i.test(String(value ?? ''));\n    if (action === 'login') {\n      if (player && !limit('TESTE_LOGIN:'+player.values.participante_id,5)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n      if (!eligible(player) || !shaFormat(hashes.passwordHash) || !shaFormat(player.values.senha_hash) || player.values.senha_hash !== hashes.passwordHash) return credentialFailure();\n      if (!shaFormat(hashes.candidate) || !shaFormat(hashes.candidateHash)) throw new Error('native_crypto');\n      const expires = new Date(nowMs+28800000).toISOString();\n      update(players,player,{token_sessao_hash:hashes.candidateHash,token_expira:expires,atualizado_em:now});\n      return finish(reply(200,'LOGIN_FICTICIO_AUTORIZADO','Acesso apenas ao ensaio fictício.',{autenticado:true,token_sessao:hashes.candidate,expira_em:expires,participante_id:player.values.participante_id}));\n    }\n    if (action === 'sessao' || action === 'logout') {\n      const found = prepared.token ? scope.filter(row => row.values.token_sessao_hash && row.values.token_sessao_hash === hashes.tokenHash) : [];\n      if (found.length > 1) throw new Error('duplicate_session');\n      const row = found[0];\n      if (action === 'logout') {\n        if (row) update(players,row,{token_sessao_hash:'',token_expira:'',atualizado_em:now});\n        return finish(reply(200,'SESSAO_REVOGADA','Sessão encerrada.',{autenticado:false}));\n      }\n      if (!eligible(row) || !Number.isFinite(Date.parse(row.values.token_expira)) || Date.parse(row.values.token_expira) <= nowMs) return credentialFailure();\n      return finish(reply(200,'SESSAO_FICTICIA_VALIDA','Sessão válida no ensaio.',{autenticado:true,participante_id:row.values.participante_id,categoria:row.values.categoria,papel_administrativo:row.values.papel_administrativo,expira_em:row.values.token_expira}));\n    }\n    if (action === 'primeiro_acesso' || action === 'recuperar_senha') {\n      const generic = reply(202,'SOLICITACAO_RECEBIDA','Se houver cadastro elegível, as instruções serão encaminhadas.');\n      if (!eligible(player) || (action === 'primeiro_acesso' ? String(player.values.senha_hash).trim() !== '' : String(player.values.senha_hash).trim() === '')) return finish(generic);\n      const purpose = action === 'primeiro_acesso' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const related = tokens.rows.filter(row => row.values.id_usuario === player.values.participante_id && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (action === 'primeiro_acesso' && related.some(live)) return finish(generic);\n      if (!shaFormat(hashes.candidateHash) || !shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      for (const row of related.filter(row => String(row.values.utilizado_em).trim() === '')) update(tokens,row,{utilizado_em:now});\n      append(tokens,{token_hash:hashes.candidateHash,tipo_usuario:'JOGADOR',id_usuario:player.values.participante_id,finalidade:purpose,expira_em:new Date(nowMs+(purpose === 'CRIAR_SENHA' ? 1800000 : 900000)).toISOString(),utilizado_em:''});\n      // Endereços .invalid são deliberadamente não entregáveis. Trocar somente em revisão futura.\n      generic.mail = {to:player.values.email,subject:'Resenha Campo 5 — TESTE FICTÍCIO',text:'Somente ensaio estrutural. '+config.origem+(purpose === 'CRIAR_SENHA' ? '/criar-senha' : '/redefinir-senha')+'#token='+hashes.candidate};\n      return finish(generic);\n    }\n    if (action === 'criar_senha' || action === 'redefinir_senha') {\n      const purpose = action === 'criar_senha' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const matching = tokens.rows.filter(row => row.values.token_hash === hashes.tokenHash && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (matching.length !== 1 || !live(matching[0])) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      const row = scope.find(candidate => candidate.values.participante_id === matching[0].values.id_usuario);\n      if (!eligible(row) || (action === 'criar_senha' && String(row.values.senha_hash).trim() !== '')) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      if (!shaFormat(hashes.passwordHash)) throw new Error('native_crypto');\n      update(players,row,{senha_hash:hashes.passwordHash,token_sessao_hash:'',token_expira:'',atualizado_em:now});\n      for (const tokenRow of tokens.rows.filter(item => item.values.id_usuario === row.values.participante_id && ['CRIAR_SENHA','REDEFINIR_SENHA'].includes(item.values.finalidade) && String(item.values.utilizado_em).trim() === '')) update(tokens,tokenRow,{utilizado_em:now});\n      return finish(reply(200,'SENHA_FICTICIA_DEFINIDA','Senha de teste definida; nenhuma sessão foi iniciada.',{proxima_acao:'login'}));\n    }\n    return finish(reply(400,'ACAO_INVALIDA','Ação não reconhecida.'));\n  } catch {\n    // Nenhum corpo de requisição, segredo ou mensagem de biblioteca é refletido.\n    return output;\n  }\n}\n\nconst config = {\"modo\": \"BLOQUEADO\", \"revisao_limite_sha256_ficticio\": false, \"controle_escritor_unico_revisado\": false, \"privacidade_e_logs_revisados\": false, \"origem_e_credencial_hml_revisadas\": false, \"spreadsheet_id\": \"CONFIGURAR_ID_PLANILHA_COPIA_FICTICIA\", \"gid_jogadores\": \"CONFIGURAR_GID_JOGADORES_COPIA\", \"gid_tokens\": \"CONFIGURAR_GID_TOKENS_COPIA\", \"gid_limites\": \"CONFIGURAR_GID_LIMITES_COPIA\", \"pelada_id\": \"CONFIGURAR_PELADA_ID_TESTE\", \"origem\": \"CONFIGURAR_ORIGEM_FRONTEND_HML\"};\nreturn [{json:prepare(\"sessao\",$input.first().json,config)}];"
+      },
+      "id": "44c3a071-03c8-5eda-8a59-b4b7b7a70415",
+      "name": "Configuração e validação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ],
+      "notesInFlow": true,
+      "notes": "BLOQUEADO. SHA-256 de senha NÃO aprovado. Somente cópia com identidades TESTE_ e e-mails .invalid. Concurrency e criptografia pública continuam pendentes."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "Ensaio explicitamente autorizado?",
+              "leftValue": "={{ $json.canRun === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3f68c8cd-11d4-577f-bfb0-9af1b23778f2",
+      "name": "Ensaio explicitamente autorizado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $('Configuração e validação').first().json.password || 'SEM_SENHA_NESTA_ACAO' }}",
+        "dataPropertyName": "passwordHash"
+      },
+      "id": "bf7ac806-39e2-5bee-8013-4bca7b9c96ea",
+      "name": "Hash senha SOMENTE FIXTURE",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $('Configuração e validação').first().json.token || 'SEM_TOKEN_NESTA_ACAO' }}",
+        "dataPropertyName": "tokenHash"
+      },
+      "id": "a30dfb08-2c71-5164-a403-a0618577e53c",
+      "name": "Hash token recebido",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "encodingType": "hex",
+        "stringLength": 64,
+        "dataPropertyName": "candidate"
+      },
+      "id": "36ac7e7e-20bb-5b34-b5d7-4c956f7f0ca5",
+      "name": "Token candidato aleatório",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        240,
+        420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $json.candidate }}",
+        "dataPropertyName": "candidateHash"
+      },
+      "id": "8837bd1a-6fa7-535b-9f6f-a7c85ce422e0",
+      "name": "Hash token candidato",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        520,
+        420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Configuração e validação').first().json.config.spreadsheet_id + '/values:batchGet?ranges=JOGADORES!A:R&ranges=TOKENS_ACESSO!A:F&ranges=LIMITES_AUTH!A:E&valueRenderOption=UNFORMATTED_VALUE' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "d3536546-5149-55e6-ad04-7331956e2b21",
+      "name": "Ler snapshot privado de teste",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_HML",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_HML"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resenha Campo 5: motor ESTRUTURAL de teste. Não é autenticação pública.\n// Sem imports, require, rede, logs ou implementação de primitivas criptográficas.\n// Hashes/randômicos são fornecidos pelos nós Crypto nativos, SOMENTE para fixtures.\nconst PLAYER_FIELDS = ['participante_id','pelada_id','nome','apelido','cpf','telefone','email','categoria','papel_administrativo','situacao','asaas_customer_id','convidado_por_id','convidado_por_nome','criado_em','atualizado_em','senha_hash','token_sessao_hash','token_expira'];\nconst TOKEN_FIELDS = ['token_hash','tipo_usuario','id_usuario','finalidade','expira_em','utilizado_em'];\nconst RATE_FIELDS = ['chave','acao','janela_inicio','contador','bloqueado_ate'];\nfunction reply(status, codigo, mensagem, extra = {}) {\n  return { status, response: { sucesso: status < 400, codigo, mensagem, modo: 'TESTE_FICTICIO', ...extra }, requests: [], mail: null };\n}\nfunction digits(value) { return String(value ?? '').replace(/\\D/g, ''); }\nfunction validCpf(cpf) {\n  if (!/^\\d{11}$/.test(cpf) || /^(\\d)\\1{10}$/.test(cpf)) return false;\n  function digit(base) {\n    let sum = 0;\n    for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (base.length + 1 - i);\n    const rest = sum % 11;\n    return rest < 2 ? 0 : 11 - rest;\n  }\n  return digit(cpf.slice(0, 9)) === Number(cpf[9]) && digit(cpf.slice(0, 10)) === Number(cpf[10]);\n}\nfunction prepare(action, request, config) {\n  const blocked = reply(503, 'HOMOLOGACAO_BLOQUEADA', 'Autenticação pública não aprovada; dependências pendentes.');\n  const flags = ['revisao_limite_sha256_ficticio','controle_escritor_unico_revisado','privacidade_e_logs_revisados','origem_e_credencial_hml_revisadas'];\n  if (config.modo !== 'TESTE_FICTICIO' || flags.some(key => config[key] !== true)) return { ...blocked, canRun: false };\n  if (!/^[A-Za-z0-9_-]{20,}$/.test(config.spreadsheet_id) || config.spreadsheet_id === '1dRBMU7BH9PLzWjgAjj4VWnLUqpSVIWC6iKQj9URczMo' || config.spreadsheet_id.startsWith('CONFIGURAR_')) return { ...blocked, canRun: false };\n  if (!/^TESTE_/.test(config.pelada_id) || !/^https:\\/\\//.test(config.origem) || config.origem.includes('CONFIGURAR_')) return { ...blocked, canRun: false };\n  if (new Set([config.gid_jogadores,config.gid_tokens,config.gid_limites]).size !== 3 || [config.gid_jogadores,config.gid_tokens,config.gid_limites].some(id => !Number.isInteger(id) || id < 0)) return { ...blocked, canRun: false };\n  const headers = Object.fromEntries(Object.entries(request.headers ?? {}).map(([k,v]) => [k.toLowerCase(),v]));\n  // O Header Auth gerenciado protege antes deste nó. Origem nunca concede identidade.\n  if (headers.origin && headers.origin !== config.origem) return { ...reply(403,'ORIGEM_INVALIDA','Origem não autorizada.'), canRun:false };\n  const body = request.body ?? {};\n  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ...reply(400,'DADOS_INVALIDOS','Formato inválido.'), canRun:false };\n  if (['login','primeiro_acesso','recuperar_senha'].includes(action)) {\n    const cpf = digits(body.cpf ?? body.cpf_assoc);\n    if (!validCpf(cpf) || (body.cpf != null && body.cpf_assoc != null && digits(body.cpf) !== digits(body.cpf_assoc))) return { ...reply(400,'DADOS_INVALIDOS','Informe os dados de acesso válidos.'), canRun:false };\n  }\n  const password = String(body.senha ?? body.nova_senha ?? '');\n  if (['login','criar_senha','redefinir_senha'].includes(action) && (password.length < (action === 'login' ? 1 : 8) || password.length > 128)) return { ...reply(400,'DADOS_INVALIDOS','Senha fora dos limites permitidos para o teste.'), canRun:false };\n  const bearer = String(headers.authorization ?? '').match(/^Bearer ([a-fA-F0-9]{64})$/);\n  const token = ['sessao','logout'].includes(action) ? (bearer?.[1] ?? '') : String(body.token ?? '').trim();\n  if (['criar_senha','redefinir_senha','sessao'].includes(action) && !/^[a-fA-F0-9]{64}$/.test(token)) return { ...reply(action === 'sessao' ? 401 : 400,'TOKEN_INVALIDO','Token ausente ou inválido.'), canRun:false };\n  return { canRun:true, action, config, cpf:digits(body.cpf ?? body.cpf_assoc), password, token };\n}\nfunction plan(prepared, snapshot, hashes, nowMs) {\n  const now = new Date(nowMs).toISOString();\n  const config = prepared.config;\n  const action = prepared.action;\n  const output = reply(503,'DADOS_INCOMPATIVEIS','Estrutura de homologação indisponível.');\n  try {\n    if (!prepared.canRun || config.modo !== 'TESTE_FICTICIO') return output;\n    function table(index, name, required, gid) {\n      const raw = snapshot.valueRanges?.[index];\n      if (!raw || !String(raw.range ?? '').replace(/'/g, '').startsWith(name + '!')) throw new Error('schema');\n      const values = raw.values ?? [];\n      const header = values[0] ?? [];\n      if (required.some(key => !header.includes(key)) || new Set(header).size !== header.length || values.length > 5001) throw new Error('schema');\n      return { header, gid, rows: values.slice(1).map((cells,i) => ({ index:i + 1, values:Object.fromEntries(header.map((key,col) => [key,cells[col] ?? ''])) })).filter(row => Object.values(row.values).some(value => value !== '')) };\n    }\n    const players = table(0,'JOGADORES',PLAYER_FIELDS,config.gid_jogadores);\n    const tokens = table(1,'TOKENS_ACESSO',TOKEN_FIELDS,config.gid_tokens);\n    const rates = table(2,'LIMITES_AUTH',RATE_FIELDS,config.gid_limites);\n    // Proteção adicional: rejeita TODA a cópia se houver qualquer identidade não fictícia.\n    if (players.rows.some(row => !String(row.values.participante_id).startsWith('TESTE_') || !String(row.values.pelada_id).startsWith('TESTE_') || !String(row.values.email).endsWith('.invalid'))) throw new Error('non_fixture');\n    if (tokens.rows.some(row => !String(row.values.id_usuario).startsWith('TESTE_'))) throw new Error('non_fixture');\n    const scope = players.rows.filter(row => row.values.pelada_id === config.pelada_id);\n    if (new Set(scope.map(row => row.values.participante_id)).size !== scope.length || new Set(scope.map(row => digits(row.values.cpf))).size !== scope.length) throw new Error('duplicate_identity');\n    const requests = [];\n    function cell(value) { return { userEnteredValue:typeof value === 'number' ? {numberValue:value} : {stringValue:String(value ?? '')} }; }\n    function update(tab,row,values) {\n      for (const [key,value] of Object.entries(values)) {\n        const col = tab.header.indexOf(key);\n        if (col < 0) throw new Error('schema');\n        requests.push({ updateCells:{start:{sheetId:tab.gid,rowIndex:row.index,columnIndex:col},rows:[{values:[cell(value)]}],fields:'userEnteredValue'} });\n      }\n    }\n    function append(tab,values) { requests.push({appendCells:{sheetId:tab.gid,rows:[{values:tab.header.map(key => cell(values[key] ?? ''))}],fields:'userEnteredValue'}}); }\n    const live = row => String(row.values.utilizado_em ?? '').trim() === '' && Number.isFinite(Date.parse(row.values.expira_em)) && Date.parse(row.values.expira_em) > nowMs;\n    const finish = response => ({ ...response,requests,mail:response.mail ?? null });\n    // Limite GLOBAL por ação, persistente na cópia de teste. Não é defesa pública por IP.\n    function limit(key,max) {\n      const matching = rates.rows.filter(row => row.values.chave === key);\n      if (matching.length > 1) throw new Error('duplicate_limit');\n      const row = matching[0];\n      const start = row ? Date.parse(row.values.janela_inicio) : NaN;\n      const inWindow = Number.isFinite(start) && start <= nowMs && nowMs - start < 900000;\n      const count = inWindow ? Number(row.values.contador) : 0;\n      if (!Number.isInteger(count) || count < 0) throw new Error('invalid_limit');\n      if (count >= max) return false;\n      const values = {chave:key,acao:action,janela_inicio:inWindow ? row.values.janela_inicio : now,contador:count+1,bloqueado_ate:count+1 >= max ? new Date((inWindow ? start : nowMs)+900000).toISOString() : ''};\n      if (row) update(rates,row,values); else append(rates,values);\n      return true;\n    }\n    if (!limit('TESTE_GLOBAL:'+action,30)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n    const player = scope.find(row => digits(row.values.cpf) === prepared.cpf);\n    const eligible = row => row && row.values.situacao === 'ativo';\n    const credentialFailure = () => finish(reply(401,'CREDENCIAIS_INVALIDAS','Não foi possível validar o acesso.'));\n    const shaFormat = value => /^[a-f0-9]{64}$/i.test(String(value ?? ''));\n    if (action === 'login') {\n      if (player && !limit('TESTE_LOGIN:'+player.values.participante_id,5)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n      if (!eligible(player) || !shaFormat(hashes.passwordHash) || !shaFormat(player.values.senha_hash) || player.values.senha_hash !== hashes.passwordHash) return credentialFailure();\n      if (!shaFormat(hashes.candidate) || !shaFormat(hashes.candidateHash)) throw new Error('native_crypto');\n      const expires = new Date(nowMs+28800000).toISOString();\n      update(players,player,{token_sessao_hash:hashes.candidateHash,token_expira:expires,atualizado_em:now});\n      return finish(reply(200,'LOGIN_FICTICIO_AUTORIZADO','Acesso apenas ao ensaio fictício.',{autenticado:true,token_sessao:hashes.candidate,expira_em:expires,participante_id:player.values.participante_id}));\n    }\n    if (action === 'sessao' || action === 'logout') {\n      const found = prepared.token ? scope.filter(row => row.values.token_sessao_hash && row.values.token_sessao_hash === hashes.tokenHash) : [];\n      if (found.length > 1) throw new Error('duplicate_session');\n      const row = found[0];\n      if (action === 'logout') {\n        if (row) update(players,row,{token_sessao_hash:'',token_expira:'',atualizado_em:now});\n        return finish(reply(200,'SESSAO_REVOGADA','Sessão encerrada.',{autenticado:false}));\n      }\n      if (!eligible(row) || !Number.isFinite(Date.parse(row.values.token_expira)) || Date.parse(row.values.token_expira) <= nowMs) return credentialFailure();\n      return finish(reply(200,'SESSAO_FICTICIA_VALIDA','Sessão válida no ensaio.',{autenticado:true,participante_id:row.values.participante_id,categoria:row.values.categoria,papel_administrativo:row.values.papel_administrativo,expira_em:row.values.token_expira}));\n    }\n    if (action === 'primeiro_acesso' || action === 'recuperar_senha') {\n      const generic = reply(202,'SOLICITACAO_RECEBIDA','Se houver cadastro elegível, as instruções serão encaminhadas.');\n      if (!eligible(player) || (action === 'primeiro_acesso' ? String(player.values.senha_hash).trim() !== '' : String(player.values.senha_hash).trim() === '')) return finish(generic);\n      const purpose = action === 'primeiro_acesso' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const related = tokens.rows.filter(row => row.values.id_usuario === player.values.participante_id && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (action === 'primeiro_acesso' && related.some(live)) return finish(generic);\n      if (!shaFormat(hashes.candidateHash) || !shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      for (const row of related.filter(row => String(row.values.utilizado_em).trim() === '')) update(tokens,row,{utilizado_em:now});\n      append(tokens,{token_hash:hashes.candidateHash,tipo_usuario:'JOGADOR',id_usuario:player.values.participante_id,finalidade:purpose,expira_em:new Date(nowMs+(purpose === 'CRIAR_SENHA' ? 1800000 : 900000)).toISOString(),utilizado_em:''});\n      // Endereços .invalid são deliberadamente não entregáveis. Trocar somente em revisão futura.\n      generic.mail = {to:player.values.email,subject:'Resenha Campo 5 — TESTE FICTÍCIO',text:'Somente ensaio estrutural. '+config.origem+(purpose === 'CRIAR_SENHA' ? '/criar-senha' : '/redefinir-senha')+'#token='+hashes.candidate};\n      return finish(generic);\n    }\n    if (action === 'criar_senha' || action === 'redefinir_senha') {\n      const purpose = action === 'criar_senha' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const matching = tokens.rows.filter(row => row.values.token_hash === hashes.tokenHash && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (matching.length !== 1 || !live(matching[0])) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      const row = scope.find(candidate => candidate.values.participante_id === matching[0].values.id_usuario);\n      if (!eligible(row) || (action === 'criar_senha' && String(row.values.senha_hash).trim() !== '')) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      if (!shaFormat(hashes.passwordHash)) throw new Error('native_crypto');\n      update(players,row,{senha_hash:hashes.passwordHash,token_sessao_hash:'',token_expira:'',atualizado_em:now});\n      for (const tokenRow of tokens.rows.filter(item => item.values.id_usuario === row.values.participante_id && ['CRIAR_SENHA','REDEFINIR_SENHA'].includes(item.values.finalidade) && String(item.values.utilizado_em).trim() === '')) update(tokens,tokenRow,{utilizado_em:now});\n      return finish(reply(200,'SENHA_FICTICIA_DEFINIDA','Senha de teste definida; nenhuma sessão foi iniciada.',{proxima_acao:'login'}));\n    }\n    return finish(reply(400,'ACAO_INVALIDA','Ação não reconhecida.'));\n  } catch {\n    // Nenhum corpo de requisição, segredo ou mensagem de biblioteca é refletido.\n    return output;\n  }\n}\n\nconst prepared = $('Configuração e validação').first().json;\nconst hashes = $('Hash token candidato').first().json;\nreturn [{json:plan(prepared,$input.first().json,hashes,Date.now())}];"
+      },
+      "id": "b8047672-bc20-5643-914c-1eb4d789aec9",
+      "name": "Planejar operação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "Google batchUpdate é usado porque o node Sheets não agrupa senha e consumo de token em um único pedido. Atomicidade do lote NÃO substitui exclusão entre execuções."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "Há gravações planejadas?",
+              "leftValue": "={{ $json.requests.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "21712111-045c-55df-998e-4d8fbe69140a",
+      "name": "Há gravações planejadas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Configuração e validação').first().json.config.spreadsheet_id + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { requests: $('Planejar operação').first().json.requests, includeSpreadsheetInResponse: false } }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "542a6a39-a266-59a1-a94a-2c8bac7f8476",
+      "name": "Aplicar lote no Sheets de teste",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        640
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_HML",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_HML"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const expected = $('Planejar operação').first().json;\nconst response = $input.first().json;\nconst id = $('Configuração e validação').first().json.config.spreadsheet_id;\nif (response.spreadsheetId !== id || !Array.isArray(response.replies) || response.replies.length !== expected.requests.length) return [{json:{status:503,response:{sucesso:false,codigo:'RESULTADO_INDETERMINADO',mensagem:'Interrompa os testes e confira o estado da cópia.',modo:'TESTE_FICTICIO'}}}];\nreturn [{json:expected}];"
+      },
+      "id": "ba459045-f994-5c4f-a757-a0490cc3882b",
+      "name": "Conferir confirmação do lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const plan = $input.first().json;\n// Não envia e-mail. O transporte será aprovado/configurado em outra etapa.\nconst body = {...plan.response};\nif (['primeiro_acesso','recuperar_senha'].includes(\"sessao\")) body.email_enviado = false;\nreturn [{json:{status:plan.status,response:body}}];"
+      },
+      "id": "88ba3f83-80fd-5620-b438-3e778ed83165",
+      "name": "Resposta mínima e entrega pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{json:{status:503,response:{sucesso:false,codigo:'DEPENDENCIA_INDISPONIVEL',mensagem:'Não foi possível concluir o ensaio. Não repita gravações sem conferir o estado.',modo:'TESTE_FICTICIO'}}}];"
+      },
+      "id": "cabf8581-60bd-59b7-93b4-ea4565b123b2",
+      "name": "Falha técnica sanitizada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Pragma",
+                "value": "no-cache"
+              },
+              {
+                "name": "Retry-After",
+                "value": "={{ $json.status === 429 ? '900' : '0' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "7d7ab9ac-06a8-5021-a085-afbdf57bd4e6",
+      "name": "Responder sem dados internos",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1360,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook de ensaio": {
+      "main": [
+        [
+          {
+            "node": "Configuração e validação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração e validação": {
+      "main": [
+        [
+          {
+            "node": "Ensaio explicitamente autorizado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensaio explicitamente autorizado?": {
+      "main": [
+        [
+          {
+            "node": "Hash senha SOMENTE FIXTURE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash senha SOMENTE FIXTURE": {
+      "main": [
+        [
+          {
+            "node": "Hash token recebido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash token recebido": {
+      "main": [
+        [
+          {
+            "node": "Token candidato aleatório",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token candidato aleatório": {
+      "main": [
+        [
+          {
+            "node": "Hash token candidato",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash token candidato": {
+      "main": [
+        [
+          {
+            "node": "Ler snapshot privado de teste",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler snapshot privado de teste": {
+      "main": [
+        [
+          {
+            "node": "Planejar operação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Planejar operação": {
+      "main": [
+        [
+          {
+            "node": "Há gravações planejadas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há gravações planejadas?": {
+      "main": [
+        [
+          {
+            "node": "Aplicar lote no Sheets de teste",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta mínima e entrega pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar lote no Sheets de teste": {
+      "main": [
+        [
+          {
+            "node": "Conferir confirmação do lote",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir confirmação do lote": {
+      "main": [
+        [
+          {
+            "node": "Resposta mínima e entrega pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta mínima e entrega pendente": {
+      "main": [
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha técnica sanitizada": {
+      "main": [
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 60
+  },
+  "tags": []
+}

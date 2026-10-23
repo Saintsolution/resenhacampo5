@@ -1,0 +1,58 @@
+{
+  "name": "Resenha Campo 5 — diagnóstico criptográfico — n8n 2.17.5",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "369b09fb-ba46-575c-b53d-8b3760186a0d",
+      "name": "Executar diagnóstico manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resenha Campo 5 — diagnóstico isolado, referência n8n 2.17.5.\n// Não usa $input, credenciais, rede, disco, ambiente ou dados reais.\n// Nenhuma instalação, fallback de algoritmo ou modificação de configuração.\nconst report = {\n  probe_version: 1,\n  target_n8n_version: '2.17.5',\n  version_source: 'confirmed_by_operator_not_detected_by_probe',\n  fictitious_data_only: true,\n  crypto: { available: false, passed: false },\n  password_algorithms: [],\n  ready_for_next_review: false,\n  authentication_approved: false,\n};\nfunction loadModule(name) {\n  try { return require(name); } catch { return null; }\n}\nfunction measureStart() { return Date.now(); }\nfunction elapsed(start) { return Math.max(0, Date.now() - start); }\nconst crypto = loadModule('crypto');\nif (crypto) {\n  report.crypto.available = true;\n  try {\n    const first = crypto.randomBytes(32).toString('hex');\n    const second = crypto.randomBytes(32).toString('hex');\n    const sha = value => crypto.createHash('sha256').update(value, 'utf8').digest('hex');\n    const digest = sha(first);\n    const checks = {\n      token_format: /^[a-f0-9]{64}$/.test(first) && /^[a-f0-9]{64}$/.test(second),\n      sample_tokens_differ: first !== second,\n      sha256_known_vector: sha('abc') === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',\n      digest_format: /^[a-f0-9]{64}$/.test(digest),\n      digest_repeatable: digest === sha(first),\n      digest_changes_with_token: digest !== sha(second),\n    };\n    report.crypto = { available: true, passed: Object.values(checks).every(value => value === true), random_source: 'crypto.randomBytes', token_bits: 256, checks };\n  } catch {\n    report.crypto = { available: true, passed: false, reason: 'probe_failed_without_sensitive_details' };\n  }\n} else report.crypto.reason = 'module_absent_or_not_allowed';\n\n// Valores artificiais definidos aqui; nunca aceitar senha ou token de entrada.\nconst password = 'SOMENTE-TESTE-ResenhaCampo5-2026!';\nconst wrong = 'ERRADA-SOMENTE-TESTE-ResenhaCampo5!';\nconst argon2 = loadModule('argon2');\nif (!argon2) {\n  report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: false, passed: false, reason: 'module_absent_or_not_allowed' });\n} else {\n  try {\n    if (argon2.argon2id !== 2 || typeof argon2.hash !== 'function' || typeof argon2.verify !== 'function') throw new Error('unsupported_api');\n    const params = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1, hashLength: 32 };\n    const timings = {};\n    let start = measureStart();\n    const first = await argon2.hash(password, params);\n    timings.hash_first_ms = elapsed(start);\n    start = measureStart();\n    const second = await argon2.hash(password, params);\n    timings.hash_second_ms = elapsed(start);\n    start = measureStart();\n    const correct = await argon2.verify(first, password);\n    timings.verify_correct_ms = elapsed(start);\n    start = measureStart();\n    const incorrect = await argon2.verify(first, wrong);\n    timings.verify_incorrect_ms = elapsed(start);\n    const a = first.split('$');\n    const b = second.split('$');\n    const phcValid = parts => parts.length === 6 && parts[1] === 'argon2id' && parts[2] === 'v=19' && parts[3] === 'm=19456,t=2,p=1' && /^[A-Za-z0-9+/]{22,}$/.test(parts[4]) && /^[A-Za-z0-9+/]{43}$/.test(parts[5]);\n    const checks = {\n      correct_password: correct === true,\n      wrong_password_rejected: incorrect === false,\n      parameters_and_format: phcValid(a) && phcValid(b),\n      independent_salts: a[4] !== b[4],\n      hashes_differ: first !== second,\n    };\n    report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: true, passed: Object.values(checks).every(value => value === true), parameters: { memory_kib: 19456, time_cost: 2, parallelism: 1, hash_bytes: 32 }, checks, timings });\n  } catch {\n    report.password_algorithms.push({ algorithm: 'argon2id', module: 'argon2', available: true, passed: false, reason: 'probe_failed_without_sensitive_details' });\n  }\n}\n\n// Verifica as duas bibliotecas separadamente. Não presume que uma dependência\n// do processo principal esteja presente ou permitida no task runner.\nfor (const name of ['bcrypt', 'bcryptjs']) {\n  const bcrypt = loadModule(name);\n  if (!bcrypt) {\n    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: false, passed: false, reason: 'module_absent_or_not_allowed' });\n    continue;\n  }\n  try {\n    if (typeof bcrypt.hash !== 'function' || typeof bcrypt.compare !== 'function' || typeof bcrypt.getRounds !== 'function') throw new Error('unsupported_api');\n    const cost = 12;\n    const timings = {};\n    let start = measureStart();\n    const first = await bcrypt.hash(password, cost);\n    timings.hash_first_ms = elapsed(start);\n    start = measureStart();\n    const second = await bcrypt.hash(password, cost);\n    timings.hash_second_ms = elapsed(start);\n    start = measureStart();\n    const correct = await bcrypt.compare(password, first);\n    timings.verify_correct_ms = elapsed(start);\n    start = measureStart();\n    const incorrect = await bcrypt.compare(wrong, first);\n    timings.verify_incorrect_ms = elapsed(start);\n    const encoded = value => /^\\$2[aby]\\$12\\$[./A-Za-z0-9]{53}$/.test(value);\n    const checks = {\n      correct_password: correct === true,\n      wrong_password_rejected: incorrect === false,\n      parameters_and_format: encoded(first) && encoded(second) && bcrypt.getRounds(first) === cost && bcrypt.getRounds(second) === cost,\n      independent_salts: first.slice(7, 29) !== second.slice(7, 29),\n      hashes_differ: first !== second,\n    };\n    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: true, passed: Object.values(checks).every(value => value === true), parameters: { cost, max_input_bytes_for_future_implementation: 72 }, checks, timings });\n  } catch {\n    report.password_algorithms.push({ algorithm: 'bcrypt', module: name, available: true, passed: false, reason: 'probe_failed_without_sensitive_details' });\n  }\n}\nreport.ready_for_next_review = report.crypto.passed === true && report.password_algorithms.some(item => item.passed === true);\n// Resultado apenas sanitizado; não é autorização para implementar ou publicar login.\nreturn [{ json: report }];\n"
+      },
+      "id": "f4ad9568-e2cc-52a1-aa68-10d9149785d8",
+      "name": "Diagnóstico criptográfico isolado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Dados fictícios. Não lê entrada, não acessa planilhas e não envia resultados externamente. Não alterar allowlists ou instalar módulos para executar este diagnóstico."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Executar diagnóstico manual": {
+      "main": [
+        [
+          {
+            "node": "Diagnóstico criptográfico isolado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "executionTimeout": 60,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "tags": []
+}

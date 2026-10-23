@@ -4,6 +4,10 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Endereços públicos; código de ativação e credenciais ficam somente no n8n.
+  VITE_N8N_BASE_URL = "https://n8n.saintsolution.com.br"
+  VITE_N8N_APP_BASE_URL = "https://n8n.saintsolution.com.br/webhook/rc5-app-v1"
+  VITE_N8N_BOOTSTRAP_URL = "https://n8n.saintsolution.com.br/webhook/rc5-app-v1/criar-conta-pelada"
 
 # Permite abrir diretamente futuras telas de convite e recuperação de senha.
 [[redirects]]

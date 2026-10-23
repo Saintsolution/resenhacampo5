@@ -1,0 +1,834 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Resenha Campo 5 — contratos estruturais de autenticação fictícia",
+    "version": "0.1.0",
+    "description": "PROPOSTA DE ENSAIO. Sem autenticação pública aprovada. Credencial Header Auth não pode ser colocada no bundle React. Native Crypto é usado em vez de imports no Code. E-mail não é enviado. Corpo de erro do Header Auth pode seguir padrão n8n antes do workflow."
+  },
+  "servers": [
+    {
+      "url": "https://n8n.saintsolution.com.br/webhook",
+      "description": "Base informada; os novos caminhos não foram publicados nem invocados."
+    }
+  ],
+  "paths": {
+    "/rc5-auth-ficticia-v1/primeiro-acesso": {
+      "post": {
+        "summary": "primeiro-acesso — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_primeiro_acesso",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cpf": {
+                    "type": "string"
+                  },
+                  "cpf_assoc": {
+                    "type": "string",
+                    "deprecated": true
+                  }
+                },
+                "required": [],
+                "anyOf": [
+                  {
+                    "required": [
+                      "cpf"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "cpf_assoc"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rc5-auth-ficticia-v1/criar-senha": {
+      "post": {
+        "summary": "criar-senha — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_criar_senha",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^[a-fA-F0-9]{64}$"
+                  },
+                  "senha": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token",
+                  "senha"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rc5-auth-ficticia-v1/login": {
+      "post": {
+        "summary": "login — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_login",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cpf": {
+                    "type": "string"
+                  },
+                  "cpf_assoc": {
+                    "type": "string",
+                    "deprecated": true
+                  },
+                  "senha": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "senha"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "cpf"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "cpf_assoc"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rc5-auth-ficticia-v1/sessao": {
+      "get": {
+        "summary": "sessao — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_sessao",
+        "security": [
+          {
+            "ChaveEnsaio": [],
+            "SessaoBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rc5-auth-ficticia-v1/logout": {
+      "post": {
+        "summary": "logout — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_logout",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bearer de sessão fictícia; ausência é idempotente. A chave X-RC5-HML-Key continua obrigatória."
+          }
+        ]
+      }
+    },
+    "/rc5-auth-ficticia-v1/recuperar-senha": {
+      "post": {
+        "summary": "recuperar-senha — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_recuperar_senha",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cpf": {
+                    "type": "string"
+                  },
+                  "cpf_assoc": {
+                    "type": "string",
+                    "deprecated": true
+                  }
+                },
+                "required": [],
+                "anyOf": [
+                  {
+                    "required": [
+                      "cpf"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "cpf_assoc"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rc5-auth-ficticia-v1/redefinir-senha": {
+      "post": {
+        "summary": "redefinir-senha — somente ensaio fictício; não homologado",
+        "operationId": "rc5_fixture_redefinir_senha",
+        "security": [
+          {
+            "ChaveEnsaio": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operação fictícia concluída; sessão/login/logout/criação/redefinição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Solicitação recebida; email_enviado=false neste pacote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de ensaio inválida, credenciais ou sessão inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não autorizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite do ensaio atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Homologação bloqueada, dependência indisponível ou resultado indeterminado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resposta"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^[a-fA-F0-9]{64}$"
+                  },
+                  "nova_senha": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token",
+                  "nova_senha"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ChaveEnsaio": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-RC5-HML-Key",
+        "description": "Segredo definido em credencial gerenciada n8n, não neste arquivo."
+      },
+      "SessaoBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token fictício de 64 caracteres hex retornado apenas no login; não usar em URL ou localStorage."
+      }
+    },
+    "schemas": {
+      "Resposta": {
+        "type": "object",
+        "required": [
+          "sucesso",
+          "codigo",
+          "mensagem",
+          "modo"
+        ],
+        "properties": {
+          "sucesso": {
+            "type": "boolean"
+          },
+          "codigo": {
+            "type": "string"
+          },
+          "mensagem": {
+            "type": "string"
+          },
+          "modo": {
+            "type": "string",
+            "enum": [
+              "TESTE_FICTICIO"
+            ]
+          },
+          "autenticado": {
+            "type": "boolean"
+          },
+          "participante_id": {
+            "type": "string"
+          },
+          "categoria": {
+            "type": "string"
+          },
+          "papel_administrativo": {
+            "type": "string"
+          },
+          "token_sessao": {
+            "type": "string",
+            "description": "SOMENTE login fictício bem-sucedido. Não é um hash nem faz parte da consulta de sessão."
+          },
+          "expira_em": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email_enviado": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "proxima_acao": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
