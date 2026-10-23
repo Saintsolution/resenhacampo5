@@ -145,3 +145,7 @@ th,.finance-link { background: #c7d0a4; }
 .back-button:focus-visible { outline: 2px solid #3f674f; outline-offset: 3px; }
 .entry-card > .back-button { display: flex; margin: 0 0 22px; }
 .welcome-video-unavailable { display: grid; place-items: center; color: #eee5bc; font: 500 24px var(--font-display); }
+/* Aproxima o verde do quadro final ao musgo das faixas, preservando logo e luz. */
+.welcome-hero { isolation: isolate; }
+.welcome-hero-ended::after { content: ''; position: absolute; inset: 0; background: #536b3f; mix-blend-mode: color; pointer-events: none; z-index: 1; }
+.welcome-video-controls { z-index: 2; }
