@@ -8,6 +8,24 @@ export default function Landing({ onCreate, onLogin, onAdmin, onDemo }: { onCrea
   const [ended, setEnded] = useState(false);
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [borderColor, setBorderColor] = useState('#3c4a2d');
+  function matchVideoBorders() {
+    const element = video.current;
+    if (!element?.videoWidth || !element.videoHeight) return;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4; canvas.height = 1;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      const { videoWidth: width, videoHeight: height } = element;
+      [[2,2],[width-3,2],[2,height-3],[width-3,height-3]].forEach(([x,y],index) => {
+        context.drawImage(element,x,y,1,1,index,0,1,1);
+      });
+      const pixels = context.getImageData(0,0,4,1).data;
+      const channels = [0,1,2].map(channel => Math.round((pixels[channel]+pixels[channel+4]+pixels[channel+8]+pixels[channel+12])/4));
+      setBorderColor(`rgb(${channels.join(',')})`);
+    } catch { /* Mantém o musgo enquanto a leitura do vídeo não estiver disponível. */ }
+  }
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const start = async () => {
@@ -26,8 +44,8 @@ export default function Landing({ onCreate, onLogin, onAdmin, onDemo }: { onCrea
   function browse() { setMenu(false); document.getElementById('peladas-proximas')?.scrollIntoView({ behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start' }); }
   return <div className="welcome-page">
     <header className="welcome-header"><a className="welcome-wordmark" href="#/" aria-label="Página inicial">RESENHA<span>FUTEBOL ENTRE AMIGOS</span></a><button className="icon-button welcome-menu" onClick={()=>setMenu(v=>!v)} aria-label={menu?'Fechar menu':'Abrir menu'} aria-expanded={menu} aria-controls="welcome-navigation">{menu?<X/>:<Menu/>}</button><nav id="welcome-navigation" className={menu?'is-open':''} aria-label="Navegação inicial"><button onClick={onCreate}>Criar pelada</button><button onClick={onAdmin}>Admin</button><button onClick={onLogin}>Minha pelada</button><button onClick={browse}>Peladas próximas</button></nav></header>
-    <section className={`welcome-hero ${ended ? 'welcome-hero-ended' : ''}`} aria-label="Vinheta de abertura Resenha">
-      {!failed && <video ref={video} src="/vinheta%20inicio.mp4" muted={muted} playsInline preload="auto" onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{setEnded(true);setPlaying(false);}} onError={()=>{setFailed(true);setPlaying(false);}} aria-label="Vinheta de abertura da Resenha"/>}
+    <section className="welcome-hero" style={{ backgroundColor:borderColor }} aria-label="Vinheta de abertura Resenha">
+      {!failed && <video ref={video} src="/vinheta%20inicio.mp4" muted={muted} playsInline preload="auto" style={{ backgroundColor:borderColor }} onLoadedData={matchVideoBorders} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{matchVideoBorders();setEnded(true);setPlaying(false);}} onError={()=>{setFailed(true);setPlaying(false);}} aria-label="Vinheta de abertura da Resenha"/>}
       {failed && <div className="welcome-video-fallback welcome-video-unavailable" role="status">Resenha · futebol entre amigos</div>}
       {!failed && <div className="welcome-video-controls"><button onClick={toggle} aria-label={ended?'Repetir vinheta':playing?'Pausar vinheta':'Reproduzir vinheta'}>{ended?<RotateCcw size={16}/>:playing?<Pause size={16}/>:<Play size={16}/>}<span>{ended?'Ver novamente':playing?'Pausar':'Reproduzir'}</span></button><button onClick={()=>setMuted(v=>!v)} aria-label={muted?'Ativar som':'Silenciar'}>{muted?<VolumeX size={17}/>:<Volume2 size={17}/>}</button></div>}
     </section>
