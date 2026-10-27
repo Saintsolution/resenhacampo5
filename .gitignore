@@ -35,3 +35,6 @@ dist-ssr
 /workflows/resenha n8n restaurado/
 /workflows/n8n/originais/
 /workflows/n8n/resenhacampo5.json
+/workflows/para importar/*.json
+__pycache__/
+*.pyc

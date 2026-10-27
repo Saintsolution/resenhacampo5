@@ -22,3 +22,13 @@ test('cliente transmite seleção por requisição sem mudar sessão global e ma
   assert.equal(calls[2].url.pathname,'/webhook/rc5-app-v1/peladas');assert.ok(!calls.some(c=>c.url.href.includes('session')));
  }finally{globalThis.fetch=original;}
 });
+
+test('cadastro OWNER envia somente a conta e o convite, sem criar pelada nem chave compartilhada',async()=>{
+ const {registerOwner}=await loadClient();const previous=globalThis.fetch;const calls=[];
+ globalThis.fetch=async(url,options)=>{calls.push({url:new URL(url),options});return new Response(JSON.stringify({sucesso:true,codigo:'OWNER_CADASTRADO',participante_id:'OWNER_TESTE'}),{headers:{'Content-Type':'application/json'}});};
+ try{
+  const o={nome:'Pessoa Teste',apelido:'Teste',cpf:'52998224725',telefone:'21912345678',email:'teste@example.invalid',senha:'SomenteTeste2026',confirmacao_senha:'SomenteTeste2026'};
+  await registerOwner(o,'a'.repeat(64),'operacao-estavel');assert.equal(calls.length,1);assert.equal(calls[0].url.pathname,'/webhook/rc5-app-v1/cadastrar-organizador');assert.equal(calls[0].options.headers['Idempotency-Key'],'operacao-estavel');assert.equal(calls[0].options.headers['X-RC5-Ativacao'],undefined);
+  const body=JSON.parse(calls[0].options.body);assert.deepEqual(body.organizador,o);assert.equal(body.convite_owner,'a'.repeat(64));assert.equal(body.pelada,undefined);assert.ok(!calls[0].url.href.includes('a'.repeat(64)));
+ }finally{globalThis.fetch=previous;}
+});

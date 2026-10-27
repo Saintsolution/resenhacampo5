@@ -1,0 +1,59 @@
+// Complemento aplicado exclusivamente ao export oficial. Usa Crypto nativo do n8n.
+function prepareOwnerRegistration(request,config) {
+ const body=request.body,headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
+ const key=String(headers['idempotency-key']??'').toLowerCase();
+ const invalid=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados do organizador e abra o convite original.'),canRun:false});
+ if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['organizador','convite_owner'].includes(k)) || typeof body.convite_owner!=='string' || !/^[a-f0-9]{64}$/i.test(body.convite_owner) || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(key))return invalid();
+ const o=body.organizador;
+ if(!o || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40 || (o.categoria??'')!=='')return invalid();
+ const prepared=prepare('cadastro_owner',{...request,body:o},config);
+ return {...prepared,token:body.convite_owner.toLowerCase(),requestId:key,profile:prepared.profile?{...prepared.profile,apelido:o.apelido.trim(),categoria:''}:null};
+}
+function planOwnerRegistration(p,snapshot,hashes,nowMs) {
+ try {
+  if(!p.canRun)return reply(400,'DADOS_INVALIDOS','Confira os dados do cadastro.');
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS),tokens=readTable(snapshot,1,'TOKENS_ACESSO',TOKEN_FIELDS);
+  if(!Array.isArray(snapshot.namedRanges) || !/^[a-f0-9]{64}$/i.test(hashes.tokenHash) || !/^[a-f0-9]{64}$/i.test(hashes.passwordHash) || !/^[a-f0-9]{64}$/i.test(hashes.cpfHash) || !/^[a-f0-9]{64}$/i.test(hashes.candidate))throw new Error('schema_crypto');
+  const matches=tokens.filter(t=>t.tipo_usuario==='OWNER' && t.finalidade==='CADASTRAR_OWNER' && t.token_hash===hashes.tokenHash);
+  let target=digits(p.profile.telefone);if(target.length===10||target.length===11)target='55'+target;
+  if(!/^55\d{10,11}$/.test(target))return reply(400,'WHATSAPP_INVALIDO','Informe o WhatsApp brasileiro com DDD.');
+  if(matches.length!==1 || matches[0].id_usuario!==target)return reply(401,'CONVITE_OWNER_INVALIDO','Convite de organizador inválido.');
+  const invite=matches[0],found=players.filter(r=>digits(r.cpf)===p.cpf);
+  if(found.length>1)throw new Error('identity');
+  const owner=found[0],requestClaim='rc5_owner_req_'+p.requestId.replace(/-/g,'_');
+  const sameRequest=snapshot.namedRanges.some(r=>r.namedRangeId===requestClaim && r.name==='RC5_OWNER_INVITE_'+hashes.tokenHash);
+  if(invite.utilizado_em) {
+   const same=owner && sameRequest && owner.papel_administrativo==='OWNER' && owner.situacao==='ativo' && owner.senha_hash===hashes.passwordHash && Object.entries(p.profile).every(([k,v])=>owner[k]===v);
+   return same?reply(200,'OWNER_CADASTRADO','Conta já cadastrada. Entre com CPF e senha.',{participante_id:owner.participante_id,proxima_acao:'login'}):reply(409,'CONVITE_OWNER_UTILIZADO','Convite já utilizado. Faça login.');
+  }
+  if(!Number.isFinite(Date.parse(invite.expira_em)) || Date.parse(invite.expira_em)<=nowMs)return reply(401,'CONVITE_OWNER_EXPIRADO','Convite de organizador expirado.');
+  if(owner)return reply(409,'CADASTRO_EXISTENTE','Já existe uma conta. Faça login.');
+  const claimIds=['rc5_owner_invite_'+hashes.tokenHash,'jl_owner_cpf_v2_'+hashes.cpfHash,requestClaim];
+  if(snapshot.namedRanges.some(r=>claimIds.includes(r.namedRangeId)))return reply(409,'CADASTRO_EXISTENTE','Confira o cadastro antes de repetir.');
+  const ownerId='OWNER_'+hashes.candidate;
+  if(players.some(r=>r.participante_id===ownerId))throw new Error('collision');
+  const requests=[],cell=v=>({userEnteredValue:{stringValue:String(v??'')}}),now=new Date(nowMs).toISOString();
+  for(const id of claimIds)requests.push({addNamedRange:{namedRange:{namedRangeId:id,name:id===requestClaim?'RC5_OWNER_INVITE_'+hashes.tokenHash:'RC5_CLAIM_'+id,range:{sheetId:p.config.gid_jogadores,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});
+  const user={...p.profile,participante_id:ownerId,pelada_id:'',cpf:p.cpf,papel_administrativo:'OWNER',situacao:'ativo',senha_hash:hashes.passwordHash,criado_em:now,atualizado_em:now};
+  requests.push({appendCells:{sheetId:p.config.gid_jogadores,rows:[{values:PLAYER_FIELDS.map(k=>cell(user[k]))}],fields:'userEnteredValue'}});
+  const row=snapshot.valueRanges[1].values.findIndex((r,i)=>i>0 && r[0]===hashes.tokenHash && r[1]==='OWNER' && r[3]==='CADASTRAR_OWNER');
+  if(row<1)throw new Error('token_row');
+  requests.push({updateCells:{start:{sheetId:p.config.gid_tokens,rowIndex:row,columnIndex:5},rows:[{values:[cell(now)]}],fields:'userEnteredValue'}});
+  return {...reply(201,'OWNER_CADASTRADO','Conta cadastrada. Entre com CPF e senha para criar sua pelada.',{participante_id:ownerId,proxima_acao:'login'}),requests};
+ }catch{return reply(503,'CADASTRO_NAO_CONFIRMADO','Não foi possível confirmar o cadastro. Confira os registros antes de repetir.');}
+}
+// Mantém o motor do export; só vincula a primeira pelada à conta que nasceu sem pelada.
+function planFirstOrNextPelada(prepared,snapshot,hashes,nowMs) {
+ const result=planBootstrap(prepared,snapshot,hashes,nowMs);
+ if(result.status!==201 || !prepared.authenticated)return result;
+ try {
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const owner=players.find(r=>r.participante_id===result.response.participante_id);
+  if(!owner)throw new Error('owner');
+  if(owner.pelada_id)return result;
+  const row=snapshot.valueRanges[0].values.findIndex((r,i)=>i>0 && r[0]===owner.participante_id);
+  if(row<1)throw new Error('row');
+  const cell=v=>({userEnteredValue:{stringValue:v}});
+  return {...result,requests:[...result.requests,...[[1,result.response.pelada_id],[14,new Date(nowMs).toISOString()]].map(([columnIndex,value])=>({updateCells:{start:{sheetId:prepared.config.gid_jogadores,rowIndex:row,columnIndex},rows:[{values:[cell(value)]}],fields:'userEnteredValue'}}))]};
+ }catch{return reply(503,'VINCULO_NAO_CONFIRMADO','Não foi possível confirmar o vínculo da primeira pelada.');}
+}

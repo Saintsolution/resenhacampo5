@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import PasswordField from './PasswordField';
 import BackButton from './BackButton';
 import { kindLabel, validateInvite, signupByInvite, paymentLink, type PublicInvite, type InviteSignupResult } from '../lib/n8n/invites';
 import { formatDateTime, validateCPF } from '../lib/utils';
@@ -48,8 +49,8 @@ export default function InvitationAccess({onHome}:{onHome:()=>void}) {
       <label>CPF<input name="cpf" required inputMode="numeric" maxLength={14} autoComplete="off"/></label>
       <label>WhatsApp que recebeu o convite<input name="telefone" type="tel" required maxLength={20} autoComplete="tel"/></label>
       <label>E-mail<input name="email" type="email" required maxLength={180} autoComplete="email"/></label>
-      <label>Senha<input name="senha" type="password" required minLength={8} maxLength={128} autoComplete="new-password"/></label>
-      <label>Confirme a senha<input name="confirmacao_senha" type="password" required minLength={8} maxLength={128} autoComplete="new-password"/></label>
+      <PasswordField label="Senha" name="senha" required minLength={8} maxLength={128} autoComplete="new-password" disabled={busy}/>
+      <PasswordField label="Confirme a senha" name="confirmacao_senha" required minLength={8} maxLength={128} autoComplete="new-password" disabled={busy}/>
       {data.tipo==='DIARISTA'&&<label>Uso de colete<select name="com_colete" defaultValue="nao"><option value="nao">Sem colete</option><option value="sim">Com colete</option></select></label>}
       <small>Ao continuar, será emitida uma cobrança real no Asaas, conforme os valores cadastrados da pelada.</small>
       <button className="button primary" type="submit">{busy?'Registrando e preparando sua cobrança…':'Cadastrar e gerar cobrança'}</button>

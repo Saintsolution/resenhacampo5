@@ -43,10 +43,18 @@ export async function ownerRequest<T>(path: 'cadastrar-organizador' | 'login' | 
   const messages: Record<number, string> = { 400: 'Confira os dados informados.', 401: path === 'cadastrar-organizador' ? 'Código de ativação inválido.' : 'CPF ou senha inválidos, ou sessão expirada.', 403: 'Você não tem permissão para esse acesso ou pelada.', 409: 'O organizador ou esse cadastro já existe. Tente entrar.', 429: 'Muitas tentativas. Aguarde 15 minutos.', 503: 'Confira a configuração no n8n. Se houve gravação, confira a planilha antes de repetir.' };
   if (path === 'convites' || path === 'validar-convite') { messages[400]='Confira os dados. O convite pode estar expirado ou já utilizado, ou a data do jogo ser inválida.'; messages[401]='Sua sessão expirou. Entre novamente.'; messages[403]='Você não tem permissão para esse convite.'; messages[409]='Já existe um convite aberto para esse número, tipo e jogo, ou a tentativa foi repetida com dados diferentes.'; }
   if (path === 'inscrever-jogador') { messages[400]='Confira CPF, telefone, senha e validade do convite. Use o WhatsApp que recebeu o convite.'; messages[409]='Cadastro ou cobrança já existente. Confira os registros antes de repetir.'; messages[503]='Não foi possível confirmar a inscrição. Peça ao organizador para conferir o n8n e o Asaas antes de repetir: a cobrança pode já ter sido emitida.'; }
+  if (path === 'cadastrar-organizador') { messages[401]='Convite de organizador inválido, expirado ou destinado a outro WhatsApp.'; messages[409]='Conta ou convite já utilizado. Faça login ou confira o cadastro antes de repetir.'; messages[404]='O cadastro de organizador ainda depende da publicação do workflow atualizado.'; }
   if (path === 'meu-cadastro') { messages[400]='Confira apelido, telefone e e-mail.'; messages[403]='Você não tem permissão para essa atualização.'; messages[404]='A atualização de cadastro ainda não está disponível.'; messages[409]='Telefone e e-mail vinculados ao Asaas estão disponíveis somente para consulta nesta etapa.'; messages[503]='Não foi possível confirmar a atualização. Consulte seu cadastro antes de repetir.'; }
   if (!response.ok) throw new Error(messages[response.status] || 'O n8n não concluiu a solicitação.');
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Resposta incompatível do webhook.');
   const result = await response.json();
   if (result.sucesso !== true) throw new Error('O backend não confirmou a operação.');
   return result as T;
+}
+
+/** Convite exclusivo de uso único; não envia nem cria uma pelada neste cadastro. */
+export async function registerOwner(organizador: OwnerRegistration & { apelido: string }, convite: string, requestId: string) {
+  const result = await ownerRequest<{ codigo: string; participante_id: string }>('cadastrar-organizador', { body: { organizador, convite_owner: convite }, requestId });
+  if (result.codigo !== 'OWNER_CADASTRADO' || !result.participante_id) throw new Error('O cadastro não foi confirmado. Confira os registros antes de repetir.');
+  return result;
 }

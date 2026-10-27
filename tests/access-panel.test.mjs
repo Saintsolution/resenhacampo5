@@ -36,7 +36,7 @@ test('painel real separa OWNER, ADMIN e jogador e não mistura peladas na seleç
   const html=renderToStaticMarkup(React.createElement(AccessPanel,{...props,session}));
   assert.ok(html.includes('Meu cadastro'));assert.ok(html.includes('Turma A'));assert.ok(!html.includes('Turma B'));
   assert.equal(html.includes('Criar outra pelada'),role==='OWNER');
-  assert.equal(html.includes('Convidar jogador'),role==='OWNER'||role==='ADMIN');
+  assert.equal(html.includes('Convidar jogador'),role==='OWNER'||role==='ADMIN'||category==='Mensalista');
   assert.equal(html.includes('ÁREA DO JOGADOR'),role==='');
  }
 });
@@ -50,4 +50,20 @@ test('cadastro pessoal mantém identidade somente para consulta e bloqueia conta
  assert.equal((html.match(/readonly=""/g)||[]).length,4);
  assert.ok(!html.includes('name="cpf"'));assert.ok(!html.includes('name="nome"'));
  assert.ok(!html.includes('name="papel_administrativo"'));assert.ok(!html.includes('name="asaas_customer_id"'));
+});
+
+test('OWNER sem pelada recebe painel com criação da primeira, sem ser tratado como cadastro inválido',()=>{
+ const session={autenticado:true,participante_id:'OWNER_TESTE',nome:'Organizador Exemplo',papel_administrativo:'OWNER',expira_em:'2099-01-01',pelada:null,peladas:[]};
+ const html=renderToStaticMarkup(React.createElement(AccessPanel,{...props,session}));assert.ok(html.includes('Criar minha pelada'));assert.ok(!html.includes('Não há pelada autorizada'));
+});
+
+const {default:OwnerAccess}=await import(moduleUrl('src/components/OwnerAccess.tsx'));
+test('menu público tem login e não oferece criação pública de pelada ou OWNER; cadastro só pelo convite',()=>{
+ const previous=globalThis.location;
+ try {
+  globalThis.location={hash:'#/'};let html=renderToStaticMarkup(React.createElement(OwnerAccess,{onDemo(){}}));assert.ok(html.includes('Entrar na minha pelada'));assert.ok(!html.includes('Criar minha pelada'));assert.ok(!html.includes('Salvar minha conta'));
+  globalThis.location={hash:'#/entrar'};html=renderToStaticMarkup(React.createElement(OwnerAccess,{onDemo(){}}));assert.ok(html.includes('type="password"'));assert.ok(html.includes('Mostrar senha'));assert.ok(!html.includes('Salvar minha conta'));
+  globalThis.location={hash:'#/cadastrar-owner'};html=renderToStaticMarkup(React.createElement(OwnerAccess,{onDemo(){}}));assert.ok(html.includes('convite exclusivo'));assert.ok(!html.includes('Salvar minha conta'));
+  globalThis.location={hash:'#/cadastrar-owner?convite='+'a'.repeat(64)};html=renderToStaticMarkup(React.createElement(OwnerAccess,{onDemo(){}}));assert.ok(html.includes('Salvar minha conta'));assert.ok(!html.includes('Nome da pelada'));assert.ok(!html.includes('a'.repeat(64)));assert.ok(html.includes('Mostrar confirmação de senha'));
+ }finally{globalThis.location=previous;}
 });
