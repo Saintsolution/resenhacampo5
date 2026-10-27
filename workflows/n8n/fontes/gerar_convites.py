@@ -5,7 +5,7 @@ root=Path(__file__).resolve().parents[1]
 base=json.loads((root/'11_sessao_APP_MVP.json').read_text())
 core=(root/'fontes/auth-owner-mvp-core.js.txt').read_text()+'\n'+(root/'fontes/pelada-bootstrap-core.js.txt').read_text()+'\n'+(root/'fontes/convites-core.js.txt').read_text()
 config={'spreadsheet_id':'1dRBMU7BH9PLzWjgAjj4VWnLUqpSVIWC6iKQj9URczMo','gid_jogadores':800101,'gid_tokens':2023862256,'gid_limites':1685501295,'gid_peladas':717198779,'gid_convites':800102,'origem':'https://resenhacampo5.netlify.app','frontend_url':'https://resenhacampo5.netlify.app'}
-for number,action,method,path in [(14,'criar','POST','convites'),(15,'listar','GET','convites'),(16,'validar','POST','validar-convite')]:
+for number,action,method,path in [(14,'criar','POST','convites'),(15,'listar','GET','convites')]:
  w=json.loads(json.dumps(base));w['name']='RC5 — '+action+' convite';w['active']=False;w['pinData']={}
  w['nodes']=[n for n in w['nodes'] if n['name']!='Hash senha legado']
  w['connections'].pop('Hash senha legado',None)

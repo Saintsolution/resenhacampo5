@@ -5,17 +5,17 @@ import type { PeladaSetup } from '../lib/n8n/bootstrap';
 import { nextGameDate, formatGameDate } from '../lib/matchDate';
 import { formatDateTime } from '../lib/utils';
 
-export default function InviteManager({token,club}:{token:string;club:PeladaSetup}) {
+export default function InviteManager({token,club}:{token:string;club:PeladaSetup & {id:string}}) {
  const [items,setItems]=useState<InviteRecord[]>([]);const [loading,setLoading]=useState(false);const [loadError,setLoadError]=useState('');
  const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');const [kind,setKind]=useState<InviteKind>('MENSALISTA');const [result,setResult]=useState<InviteResult|null>(null);
  const sending=useRef(false);const requestId=useRef(crypto.randomUUID());
- async function refresh(){setLoading(true);setLoadError('');try{const data=await listInvites(token);setItems(data.convites);}catch(e){setLoadError(e instanceof Error?e.message:'Não foi possível carregar os convites.');}finally{setLoading(false);}}
- useEffect(()=>{let active=true;setLoading(true);void listInvites(token).then(data=>{if(active)setItems(data.convites);}).catch(e=>{if(active)setLoadError(e instanceof Error?e.message:'Falha ao consultar convites.');}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[token]);
+ async function refresh(){setLoading(true);setLoadError('');try{const data=await listInvites(token,club.id);setItems(data.convites);}catch(e){setLoadError(e instanceof Error?e.message:'Não foi possível carregar os convites.');}finally{setLoading(false);}}
+ useEffect(()=>{let active=true;setLoading(true);void listInvites(token,club.id).then(data=>{if(active)setItems(data.convites);}).catch(e=>{if(active)setLoadError(e instanceof Error?e.message:'Falha ao consultar convites.');}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[token,club.id]);
  async function submit(event:FormEvent<HTMLFormElement>){
   event.preventDefault();if(sending.current)return;
   const form=event.currentTarget;const data=new FormData(form);sending.current=true;setBusy(true);setError('');setNotice('');
   try {
-   const response=await createInvite(token,{apelido:String(data.get('apelido')||'').trim(),whatsapp:String(data.get('whatsapp')||''),tipo:kind,...(kind==='DIARISTA'?{data_jogo:String(data.get('data_jogo'))}:{})},requestId.current);
+   const response=await createInvite(token,{apelido:String(data.get('apelido')||'').trim(),whatsapp:String(data.get('whatsapp')||''),tipo:kind,...(kind==='DIARISTA'?{data_jogo:String(data.get('data_jogo'))}:{})},requestId.current,club.id);
    setResult(response);setItems(current=>[response.convite,...current.filter(i=>i.convite_id!==response.convite.convite_id)]);
    requestId.current=crypto.randomUUID();form.reset();setKind('MENSALISTA');
    if(!response.link_disponivel)setNotice('O convite já está registrado. O link secreto só é exibido na emissão original; não gere outro às cegas.');

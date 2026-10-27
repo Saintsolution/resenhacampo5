@@ -55,3 +55,14 @@ test('link válido é consultado sem consumo; expirado/utilizado/token errado re
 test('grafos importáveis sem pins, credenciais reais ou references para nodes removidos',()=>{
  for(const file of ['14_criar_convite_APP_MVP.json','15_listar_convite_APP_MVP.json','16_validar_convite_APP_MVP.json']){const w=JSON.parse(fs.readFileSync(root+file));assert.equal(w.active,false);assert.deepEqual(w.pinData,{});const names=new Set(w.nodes.map(n=>n.name));for(const n of w.nodes){if(n.parameters.jsCode)new Function(n.parameters.jsCode);for(const c of Object.values(n.credentials??{}))assert.match(c.id,/^CONFIGURAR_/);}for(const c of Object.values(w.connections))for(const list of c.main)for(const e of list)assert.ok(names.has(e.node));assert.ok(!names.has('Hash senha legado'));}
 });
+
+test('convites da segunda pelada respeitam OWNER, preço/contexto e listagem isolada',()=>{
+ const s=snapshot();const second=[...s.valueRanges[3].values[1]];second[0]='PELADA_SECOND';second[1]='Segunda';s.valueRanges[3].values.push(second);
+ const prepared=prepareInvite('criar',{headers:{authorization:'Bearer '+session,'idempotency-key':key},query:{pelada_id:'PELADA_SECOND'},body:baseInput},config);
+ const result=planInvite(prepared,s,hashes,now);assert.equal(result.status,201);apply(s,result.requests);
+ assert.equal(s.valueRanges[4].values[1][1],'PELADA_SECOND');
+ const list=id=>planInvite(prepareInvite('listar',{headers:{authorization:'Bearer '+session},query:{pelada_id:id}},config),s,hashes,now);
+ assert.equal(list('PELADA_SECOND').response.convites.length,1);assert.equal(list('PELADA_TEST').response.convites.length,0);
+ second[12]='OTHER_OWNER';assert.equal(list('PELADA_SECOND').status,403);
+ second[12]='OWNER_TEST';s.valueRanges[0].values[1][8]='ADMIN';assert.equal(list('PELADA_SECOND').status,403);
+});

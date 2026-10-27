@@ -26,3 +26,12 @@ dist-ssr
 .netlify
 .env.*
 !.env.example
+
+# Exports privados do n8n: incluem credenciais/configurações de produção.
+/workflows/etapa a pronta/*.json
+/workflows/etapa a pronta/*.bak
+/workflows/etapa a teste/*.json
+/workflows/novo n8n/
+/workflows/resenha n8n restaurado/
+/workflows/n8n/originais/
+/workflows/n8n/resenhacampo5.json

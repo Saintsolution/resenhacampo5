@@ -1,14 +1,13 @@
-import InviteManager from './InviteManager';
+import PeladaFields from './PeladaFields';
+import AccessPanel from './AccessPanel';
 import InvitationAccess from './InvitationAccess';
-import { nextGameDate, formatGameDate } from '../lib/matchDate';
-import { formatCurrency } from '../lib/utils';
 import BackButton from './BackButton';
 import Landing from './Landing';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUpRight, LogOut, ShieldCheck } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { validateCPF } from '../lib/utils';
 import { bootstrapConfigured, initialPelada, registerPelada, validatePelada, type BootstrapPayload, type PeladaSetup } from '../lib/n8n/bootstrap';
-import { ownerRequest, type OwnerSession } from '../lib/n8n/owner';
+import { ownerRequest, validAppSession, type OwnerSession } from '../lib/n8n/owner';
 
 type Screen = 'inicio' | 'cadastro' | 'pelada' | 'login' | 'convite';
 const fromHash = (): Screen => location.hash.startsWith('#/convite') ? 'convite' : location.hash === '#/criar-pelada' ? 'cadastro' : location.hash === '#/entrar' || location.hash === '#/admin' ? 'login' : 'inicio';
@@ -26,7 +25,7 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     window.addEventListener('popstate', onHash);
     return () => { window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash); };
   }, []);
-  const [showInvites,setShowInvites] = useState(false);
+  const [addingPelada,setAddingPelada] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -64,9 +63,9 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
         const login = await ownerRequest<{ token_sessao: string }>('login', { body: { cpf, senha: get('senha') } });
         if (!/^[a-f0-9]{64}$/i.test(login.token_sessao)) throw new Error('O n8n não retornou uma sessão válida.');
         const session = await ownerRequest<OwnerSession>('sessao', { token: login.token_sessao });
-        if (!session.autenticado || session.papel_administrativo !== 'OWNER') throw new Error('Este acesso é exclusivo do organizador.');
-        if (!session.pelada) throw new Error('A sessão foi validada, mas a pelada não foi carregada. Importe o workflow 11 atualizado.');
-        form.reset(); setShowInvites(false); setAuth({ token: login.token_sessao, session });
+        if (!validAppSession(session)) throw new Error('Seu perfil não tem acesso autorizado.');
+        if (!Array.isArray(session.peladas) && !session.pelada) throw new Error('Atualize o workflow 11 para carregar suas peladas.');
+        form.reset(); setAddingPelada(false); setAuth({ token: login.token_sessao, session });
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { submitting.current=false; setBusy(false); }
   }
@@ -83,7 +82,30 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     } catch(e) {setError(e instanceof Error ? e.message : 'Não foi possível concluir o cadastro.');}
     finally {submitting.current=false;setBusy(false);}
   }
-  function field(key: keyof PeladaSetup, value: string) { setPelada(p=>({...p,[key]:typeof initialPelada[key]==='number'?Number(value):value})); }
+  async function selectPelada(id: string) {
+    if (!auth || submitting.current) return;
+    submitting.current=true; setBusy(true); setError(''); setMessage('');
+    try {
+      const session=await ownerRequest<OwnerSession>('sessao',{token:auth.token,peladaId:id});
+      if (!validAppSession(session) || session.pelada?.id!==id) throw new Error('A seleção da pelada não foi confirmada.');
+      setAuth({token:auth.token,session});
+    } catch(e) { setError(e instanceof Error?e.message:'Não foi possível selecionar a pelada.'); }
+    finally {submitting.current=false;setBusy(false);}
+  }
+  async function createAnotherPelada(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!auth || auth.session.papel_administrativo!=='OWNER' || submitting.current) return;
+    const problem=validatePelada(pelada); if(problem) {setError(problem);return;}
+    submitting.current=true;setBusy(true);setError('');setMessage('');
+    try {
+      const created=await ownerRequest<{codigo:string;pelada_id:string}>('peladas',{token:auth.token,body:{pelada},requestId:requestId.current});
+      if(created.codigo!=='PELADA_CRIADA' || !created.pelada_id) throw new Error('Confira o cadastro antes de repetir.');
+      const session=await ownerRequest<OwnerSession>('sessao',{token:auth.token,peladaId:created.pelada_id});
+      if (!session.autenticado || session.papel_administrativo!=='OWNER' || session.pelada?.id!==created.pelada_id) throw new Error('A pelada foi criada, mas sua consulta não foi confirmada. Entre novamente antes de criar outra.');
+      setAuth({token:auth.token,session});setAddingPelada(false);requestId.current=crypto.randomUUID();setMessage('Pelada criada e selecionada.');
+    } catch(e) {setError(e instanceof Error?e.message:'Não foi possível confirmar a criação. Confira os registros antes de repetir.');}
+    finally {submitting.current=false;setBusy(false);}
+  }
+  function field(key: keyof PeladaSetup, value: string) { setPelada(p=>({...p,[key]:typeof initialPelada[key]==='number'?(value===''?NaN:Number(value)):value})); }
   async function logout() {
     if (!auth) return;
     setBusy(true); setError('');
@@ -92,24 +114,23 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     finally { setBusy(false); }
   }
   if (screen === 'convite' && !auth) return <InvitationAccess onHome={()=>change('inicio')}/>;
-  if (screen === 'inicio' && !auth) return <Landing onCreate={()=>change('cadastro')} onLogin={()=>change('login')} onAdmin={()=>{change('login');history.replaceState(null,'','#/admin');}} onDemo={onDemo}/>;
-  if (auth && auth.session.pelada) {
-    const club=auth.session.pelada;
-    return <div className="demo-entry"><section className="entry-card owner-panel"><img src="/marca_resenha.jpg" alt="Resenha FC"/><div className="eyebrow">PAINEL DO ORGANIZADOR</div><h1>{club.nome}</h1><p>Olá, {auth.session.nome}.</p><nav className="owner-panel-nav" aria-label="Painel do organizador"><button className={`button ${!showInvites?'primary':'light'}`} onClick={()=>setShowInvites(false)}>Dashboard</button><button className={`button ${showInvites?'primary':'light'}`} onClick={()=>setShowInvites(true)}>Convidar jogador</button></nav>{showInvites?<InviteManager token={auth.token} club={club}/>:<><div className="entry-explanation"><strong><ShieldCheck size={18}/> OWNER · {auth.session.categoria || 'Somente organização'}</strong><span>{club.local}{club.cidade && <><br/>{club.cidade}</>}</span></div><div className="entry-explanation"><strong>Próxima pelada</strong><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}</span><strong>{auth.session.total_jogadores ?? '—'} jogadores ativos cadastrados</strong></div><div className="entry-explanation"><strong>Valores cadastrados</strong><span>Mensalidade: {formatCurrency(club.mensalidade)}<br/>Diária sem colete: {formatCurrency(club.diaria_sem_colete)}<br/>Diária com colete: {formatCurrency(club.diaria_com_colete)}<br/>Colete avulso: {formatCurrency(club.colete_avulso)}<br/>Vencimento mensal: dia {club.vencimento_mensal}<br/>Convites: {club.validade_convite_horas} horas</span></div><small>Dados carregados da sua pelada.</small></>}{error && <p role="alert">{error}</p>}<button className="button primary" disabled={busy} onClick={logout}><LogOut size={17}/>{busy ? 'Encerrando…' : 'Sair'}</button></section></div>;
-  }
+  if (screen === 'inicio' && !auth) return <Landing onCreate={()=>{setPelada({...initialPelada});change('cadastro');}} onLogin={()=>change('login')} onDemo={onDemo}/>;
+  if (auth && auth.session.papel_administrativo==='OWNER' && (addingPelada || !auth.session.pelada)) return <div className="demo-entry"><section className="entry-card owner-panel">
+    <h1>Criar outra pelada</h1><p>Olá, {auth.session.nome}.</p>
+    <form className="owner-form" onSubmit={createAnotherPelada}><PeladaFields value={pelada} onField={field} disabled={busy}/>
+      {error && <p role="alert">{error}</p>}<button className="button primary" disabled={busy}>{busy?'Salvando…':'Criar pelada'}</button>
+    </form><button className="button light" disabled={busy} onClick={()=>{setAddingPelada(false);setError('');}}>Voltar ao painel</button>
+    <button className="text-button" disabled={busy} onClick={logout}>Sair</button>
+  </section></div>;
+  if (auth) return <AccessPanel key={auth.session.pelada?.id || auth.session.participante_id} session={auth.session} token={auth.token} busy={busy} message={message} error={error}
+    onSelect={id=>void selectPelada(id)} onLogout={()=>void logout()}
+    onCreate={()=>{if(auth.session.papel_administrativo!=='OWNER')return;setPelada({...initialPelada});requestId.current=crypto.randomUUID();setAddingPelada(true);setError('');setMessage('');}}
+    onProfileSaved={profile=>setAuth(current=>current?{...current,session:{...current.session,meu_cadastro:profile}}:null)}/>;
 
-  return <div className="demo-entry"><section className="entry-card"><BackButton disabled={busy} onClick={()=>change('inicio')}/><img src="/marca_resenha.jpg" alt="Resenha FC"/><div className="eyebrow">RESENHA FUTEBOL CAMPO 5</div><h1>{screen === 'cadastro' ? 'Seus dados de organizador' : screen === 'pelada' ? 'Crie sua pelada' : screen === 'login' ? location.hash === '#/admin' ? 'Acesso administrativo' : 'Entrar na minha pelada' : 'A resenha começa aqui.'}</h1><p>Aterro do Flamengo · Campo 5<br/>Sábados, das 09h às 10h</p>{screen === 'inicio' ? <><button className="button primary" onClick={() => change('login')}>Entrar na minha pelada<ArrowUpRight size={17}/></button><button className="button light" onClick={() => change('cadastro')}>Criar minha pelada</button><button className="text-button" onClick={onDemo}>Explorar demonstração com dados fictícios</button><small>Cadastro inicial exclusivo do responsável, com código de ativação.</small></> : screen === 'pelada' && organizer ? <>
+  return <div className="demo-entry"><section className="entry-card"><BackButton disabled={busy} onClick={()=>change('inicio')}/><div className="eyebrow">JOGOLINDO</div><h1>{screen === 'cadastro' ? 'Seus dados de organizador' : screen === 'pelada' ? 'Crie sua pelada' : screen === 'login' ? 'Entrar na minha pelada' : 'A resenha começa aqui.'}</h1><p>{screen==='login'?'Um acesso para organizar e jogar.':'Cadastre sua conta e configure sua pelada.'}</p>{screen === 'inicio' ? <><button className="button primary" onClick={() => change('login')}>Entrar na minha pelada<ArrowUpRight size={17}/></button><button className="button light" onClick={() => change('cadastro')}>Criar minha pelada</button><button className="text-button" onClick={onDemo}>Explorar demonstração com dados fictícios</button><small>Cadastro inicial exclusivo do responsável, com código de ativação.</small></> : screen === 'pelada' && organizer ? <>
       <p className="setup-progress">Etapa 2 de 2 · Revise os dados antes de salvar</p>
       <form className="owner-form" onSubmit={submitPelada}>
-        <fieldset disabled={busy}><legend>Local e horário</legend>
-          {(['nome','local','cidade'] as const).map(key=><label key={key}>{key==='nome'?'Nome da pelada':key==='local'?'Local':'Cidade'}<input required maxLength={150} value={pelada[key]} onChange={e=>field(key,e.target.value)}/></label>)}
-          <label>Dia da semana<select value={pelada.dia_semana} onChange={e=>field('dia_semana',e.target.value)}>{['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'].map((day,i)=><option key={day} value={i}>{day}</option>)}</select></label>
-          <div className="setup-grid"><label>Horário inicial<input required type="time" value={pelada.horario_inicio} onChange={e=>field('horario_inicio',e.target.value)}/></label><label>Horário final<input required type="time" value={pelada.horario_fim} onChange={e=>field('horario_fim',e.target.value)}/></label></div>
-        </fieldset>
-        <fieldset disabled={busy}><legend>Valores e regras</legend><div className="setup-grid">
-          {([['mensalidade','Mensalidade'],['diaria_sem_colete','Diária sem colete'],['diaria_com_colete','Diária com colete'],['colete_avulso','Colete avulso']] as const).map(([key,label])=><label key={key}>{label} (R$)<input required type="number" min="0" max="100000" step="0.01" value={pelada[key]} onChange={e=>field(key,e.target.value)}/></label>)}
-          <label>Dia do vencimento<input required type="number" min="1" max="28" step="1" value={pelada.vencimento_mensal} onChange={e=>field('vencimento_mensal',e.target.value)}/></label><label>Validade do convite (horas)<input required type="number" min="1" max="720" step="1" value={pelada.validade_convite_horas} onChange={e=>field('validade_convite_horas',e.target.value)}/></label>
-        </div></fieldset>
+        <PeladaFields value={pelada} onField={field} disabled={busy}/>
         <label>Código de ativação<input name="ativacao" type="password" required maxLength={256} autoComplete="off" disabled={busy}/></label>
         <small>Cadastro inicial exclusivo do responsável. Sua conta e a configuração da pelada serão enviadas juntas.</small>
         {!bootstrapConfigured && <p className="setup-notice" role="status">Configure a conexão de cadastro para salvar a conta e a pelada. Enquanto isso, você pode revisar todos os campos; nenhum dado será enviado.</p>}

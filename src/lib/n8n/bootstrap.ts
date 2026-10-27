@@ -7,9 +7,9 @@ export interface PeladaSetup {
   colete_avulso: number; vencimento_mensal: number; validade_convite_horas: number;
 }
 export const initialPelada: PeladaSetup = {
-  nome: 'RESENHA FUTEBOL CAMPO 5', local: 'Aterro do Flamengo — Campo 5', cidade: 'Rio de Janeiro', dia_semana: 6,
-  horario_inicio: '09:00', horario_fim: '10:00', mensalidade: 30, diaria_sem_colete: 15,
-  diaria_com_colete: 20, colete_avulso: 5, vencimento_mensal: 10, validade_convite_horas: 72,
+  nome: '', local: '', cidade: '', dia_semana: -1,
+  horario_inicio: '', horario_fim: '', mensalidade: NaN, diaria_sem_colete: NaN,
+  diaria_com_colete: NaN, colete_avulso: NaN, vencimento_mensal: NaN, validade_convite_horas: NaN,
 };
 export interface BootstrapPayload { organizador: OwnerRegistration & { apelido: string }; pelada: PeladaSetup }
 export function validatePelada(p: PeladaSetup): string | null {

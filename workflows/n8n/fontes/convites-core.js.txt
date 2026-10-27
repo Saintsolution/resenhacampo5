@@ -19,7 +19,9 @@ function prepareInvite(action,request,config) {
   if(body.tipo==='DIARISTA' && (typeof body.data_jogo!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(body.data_jogo)))return fail(400,'JOGO_INVALIDO','Informe o jogo do diarista.');
   input={key:key.toLowerCase(),apelido:body.apelido.trim(),whatsapp:phone,tipo:body.tipo,data_jogo:body.tipo==='DIARISTA'?body.data_jogo:''};
  }
- return {canRun:true,action,token,input,config};
+ const selected=selectedPelada(request);
+ if(selected===null)return fail(400,'PELADA_INVALIDA','Seleção inválida.');
+ return {canRun:true,action,token,input,config,selectedPelada:selected};
 }
 function planInvite(p,snapshot,hashes,nowMs) {
  const deny=(status,code,msg)=>reply(status,code,msg);
@@ -47,9 +49,12 @@ function planInvite(p,snapshot,hashes,nowMs) {
   }
   const matches=players.filter(r=>r.token_sessao_hash===hashes.tokenHash&&r.situacao==='ativo'&&Date.parse(r.token_expira)>nowMs);
   if(matches.length!==1)return deny(401,'SESSAO_INVALIDA','Entre novamente para continuar.');
-  const user=matches[0];const clubsForUser=clubs.filter(c=>c.pelada_id===user.pelada_id&&c.situacao==='ativo');
-  if(clubsForUser.length!==1)throw new Error('club');
-  const club=clubsForUser[0];const role=String(user.papel_administrativo).toUpperCase();const admin=role==='ADMIN'||role==='OWNER';
+  const user=matches[0];const role=String(user.papel_administrativo).toUpperCase();const admin=role==='ADMIN'||role==='OWNER';
+  const selected=p.selectedPelada || user.pelada_id;
+  const clubsForUser=clubs.filter(c=>c.pelada_id===selected&&c.situacao==='ativo');
+  if(clubsForUser.length!==1)return deny(403,'SEM_PERMISSAO','Pelada indisponível ou não autorizada.');
+  const club=clubsForUser[0];
+  if(role!=='OWNER'&&club.pelada_id!==user.pelada_id)return deny(403,'SEM_PERMISSAO','Acesso não autorizado.');
   if(role==='OWNER'&&club.owner_id!==user.participante_id)return deny(403,'SEM_PERMISSAO','Acesso não autorizado.');
   if(!admin) {
    const months=readTable(snapshot,5,'MENSALIDADES',MONTH_FIELDS);

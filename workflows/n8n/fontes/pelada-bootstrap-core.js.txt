@@ -22,61 +22,135 @@ function readPelada(row) {
  if(!peladaValid({...p,cidade:'cidade no local'}) || row.situacao!=='ativo')throw new Error('pelada_invalid');
  return p;
 }
-function prepareBootstrap(request,config) {
-  const body=request.body;
-  const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
-  const key=String(headers['idempotency-key']??'');
-  const bad=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados do organizador e da pelada.'),canRun:false});
-  if(!body || typeof body!=='object' || !body.organizador || !peladaValid(body.pelada) || !/^[a-f0-9-]{36}$/i.test(key)) return bad();
-  const o=body.organizador;
-  if(!['','Mensalista','Diarista'].includes(o.categoria??'') || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40) return bad();
-  const p=prepare('cadastro_owner',{...request,body:o},config);
-  if(!Number.isInteger(config.gid_peladas)||config.gid_peladas<0) return {...reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração da planilha.'),canRun:false};
-  return {...p,profile:p.profile?{...p.profile,apelido:o.apelido.trim(),categoria:o.categoria??''}:null,pelada:body.pelada,requestId:key};
+function selectedPelada(request) {
+ const value=request.query?.pelada_id ?? request.body?.pelada_id ?? '';
+ return typeof value==='string' && value.length<=150 && (!value || /^[A-Za-z0-9_-]+$/.test(value)) ? value : null;
+}
+function prepareSession(request,config) {
+ const p=prepare('sessao',request,config),selected=selectedPelada(request);
+ return selected===null?{...reply(400,'PELADA_INVALIDA','Seleção inválida.'),canRun:false}:{...p,selectedPelada:selected};
+}
+function prepareBootstrap(request,config,authenticated=false) {
+ const body=request.body;
+ const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
+ const key=String(headers['idempotency-key']??'').toLowerCase();
+ const bad=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados da pelada e da operação.'),canRun:false});
+ if(!body || typeof body!=='object' || Array.isArray(body) || !peladaValid(body.pelada) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(key))return bad();
+ if(!Number.isInteger(config.gid_peladas)||config.gid_peladas<0)return {...reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração da planilha.'),canRun:false};
+ if(authenticated)return {...prepare('sessao',request,config),authenticated:true,pelada:body.pelada,requestId:key};
+ const o=body.organizador;
+ if(!o || !['','Mensalista','Diarista'].includes(o.categoria??'') || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40)return bad();
+ const p=prepare('cadastro_owner',{...request,body:o},config);
+ return {...p,profile:p.profile?{...p.profile,apelido:o.apelido.trim(),categoria:o.categoria??''}:null,pelada:body.pelada,requestId:key};
 }
 function planBootstrap(prepared,snapshot,hashes,nowMs) {
  try {
+  if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Operação inválida.');
   const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
   const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);
-  if(!Array.isArray(snapshot.namedRanges))throw new Error('metadata');
-  const marker=snapshot.namedRanges.find(r=>r.namedRangeId==='rc5_owner_bootstrap_v1');
-  const expectedMarker='RC5_OWNER_'+prepared.requestId.replace(/-/g,'_');
-  const owners=players.filter(r=>String(r.papel_administrativo).trim().toUpperCase()==='OWNER');
-  if(owners.length || clubs.length || marker) {
-   const owner=owners[0];const club=clubs[0];
-   const paired=owners.length===1 && clubs.length===1 && owner.pelada_id===club.pelada_id && club.owner_id===owner.participante_id;
-   if(!paired)return reply(503,'CADASTRO_INCONSISTENTE','Confira o cadastro existente antes de repetir. Nenhum registro foi alterado.');
-   const wanted=peladaValues(prepared.pelada,club.pelada_id,owner.participante_id);
-   const same=marker?.name===expectedMarker && digits(owner.cpf)===prepared.cpf && owner.senha_hash===hashes.passwordHash && ['nome','email','telefone','apelido','categoria'].every(k=>owner[k]===prepared.profile[k]) && Object.entries(wanted).every(([k,v])=>String(club[k])===String(v));
-   return same?reply(200,'PELADA_CRIADA','Conta e pelada já foram criadas.',{proxima_acao:'login',participante_id:owner.participante_id,pelada_id:club.pelada_id}):reply(409,'OWNER_JA_EXISTE','O organizador e a pelada já foram cadastrados. Faça login.');
+  if(!Array.isArray(snapshot.namedRanges) || new Set(clubs.map(c=>c.pelada_id)).size!==clubs.length)throw new Error('metadata');
+  const byId=id=>players.filter(r=>r.participante_id===id);
+  let owner;
+  let authRequests=[];
+  if(prepared.authenticated) {
+   const access=plan(prepared,snapshot,hashes,nowMs);
+   if(access.status!==200 || !access.response.autenticado)return access;
+   authRequests=access.requests;
+   const found=byId(access.response.participante_id);
+   if(found.length!==1)throw new Error('identity');
+   owner=found[0];
+   if(String(owner.papel_administrativo).toUpperCase()!=='OWNER')return reply(403,'ACESSO_RESTRITO','Somente o OWNER pode criar peladas.');
+  } else {
+   const found=players.filter(r=>digits(r.cpf)===prepared.cpf);
+   if(found.length>1)throw new Error('identity');
+   owner=found[0];
   }
+  const claimId='rc5_club_req_'+prepared.requestId.replace(/-/g,'_');
+  const markers=snapshot.namedRanges.filter(r=>r.namedRangeId===claimId);
+  // Compatibilidade de repetição com o bootstrap antigo, sem bloqueio global.
+  const legacy=snapshot.namedRanges.find(r=>r.namedRangeId==='rc5_owner_bootstrap_v1' && r.name==='RC5_OWNER_'+prepared.requestId.replace(/-/g,'_'));
+  if(markers.length>1)throw new Error('marker');
+  const marker=markers[0];
+  if(marker || legacy) {
+   const club=marker?clubs.find(c=>'RC5_CLUB_'+c.pelada_id===marker.name):clubs.find(c=>owner && c.pelada_id===owner.pelada_id && c.owner_id===owner.participante_id);
+   const profileMatches=prepared.authenticated || owner && owner.senha_hash===hashes.passwordHash && ['nome','email','telefone','apelido','categoria'].every(k=>owner[k]===prepared.profile[k]);
+   const same=owner && String(owner.papel_administrativo).toUpperCase()==='OWNER' && owner.situacao==='ativo' && club && club.owner_id===owner.participante_id && profileMatches && Object.entries(peladaValues(prepared.pelada,club.pelada_id,owner.participante_id)).every(([k,v])=>String(club[k])===String(v));
+   return same?reply(200,'PELADA_CRIADA','Pelada já criada.',{participante_id:owner.participante_id,pelada_id:club.pelada_id}):reply(409,'REQUISICAO_DIVERGENTE','Operação já utilizada. Confira o cadastro antes de repetir.');
+  }
+  if(!prepared.authenticated && owner)return reply(409,'CADASTRO_EXISTENTE','Faça login para criar outra pelada.');
+  if(!/^[a-f0-9]{64}$/i.test(hashes.candidate))throw new Error('crypto');
   const peladaId='PELADA_'+hashes.candidate;
-  const result=plan({...prepared,config:{...prepared.config,pelada_id:peladaId}},snapshot,hashes,nowMs);
-  if(result.status!==201)return result;
-  const append=result.requests.find(r=>r.appendCells?.sheetId===prepared.config.gid_jogadores);
-  const claim=result.requests.find(r=>r.addNamedRange);
-  if(!append || !claim)throw new Error('owner_plan');
-  const ownerId='OWNER_'+hashes.candidate;
+  if(clubs.some(c=>c.pelada_id===peladaId))throw new Error('collision');
+  const ownerId=owner?.participante_id || 'OWNER_'+hashes.candidate;
+  if(!owner && byId(ownerId).length)throw new Error('collision');
+  const requests=[...authRequests];
   const cell=v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v??'')}});
-  append.appendCells.rows[0].values[PLAYER_FIELDS.indexOf('apelido')]=cell(prepared.profile.apelido);
-  append.appendCells.rows[0].values[PLAYER_FIELDS.indexOf('categoria')]=cell(prepared.profile.categoria);
-  claim.addNamedRange.namedRange.name=expectedMarker;
-  const club=peladaValues(prepared.pelada,peladaId,ownerId);
-  result.requests.push({appendCells:{sheetId:prepared.config.gid_peladas,rows:[{values:PELADA_FIELDS.map(k=>cell(club[k]))}],fields:'userEnteredValue'}});
-  return {...result,status:201,response:{sucesso:true,codigo:'PELADA_CRIADA',mensagem:'Conta e pelada criadas. Entre com CPF e senha.',proxima_acao:'login',participante_id:ownerId,pelada_id:peladaId,modo:'MVP_LEGADO'}};
- }catch{return reply(503,'DADOS_INCOMPATIVEIS','Não foi possível confirmar o cadastro conjunto. Confira JOGADORES e PELADAS antes de repetir.');}
+  const append=(gid,fields,row)=>requests.push({appendCells:{sheetId:gid,rows:[{values:fields.map(k=>cell(row[k]))}],fields:'userEnteredValue'}});
+  const claim=(id,name,gid)=>requests.push({addNamedRange:{namedRange:{namedRangeId:id,name,range:{sheetId:gid,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});
+  claim(claimId,'RC5_CLUB_'+peladaId,prepared.config.gid_peladas);
+  if(!owner) {
+   if(!/^[a-f0-9]{64}$/i.test(hashes.passwordHash)||!/^[a-f0-9]{64}$/i.test(hashes.cpfHash))throw new Error('crypto');
+   const cpfClaim='rc5_owner_cpf_'+hashes.cpfHash;
+   if(snapshot.namedRanges.some(r=>r.namedRangeId===cpfClaim))return reply(409,'CADASTRO_EXISTENTE','Confira o cadastro existente antes de repetir.');
+   claim(cpfClaim,'RC5_OWNER_CPF_'+hashes.cpfHash,prepared.config.gid_jogadores);
+   const now=new Date(nowMs).toISOString();
+   append(prepared.config.gid_jogadores,PLAYER_FIELDS,{...prepared.profile,participante_id:ownerId,pelada_id:peladaId,cpf:prepared.cpf,papel_administrativo:'OWNER',situacao:'ativo',senha_hash:hashes.passwordHash,criado_em:now,atualizado_em:now});
+  }
+  append(prepared.config.gid_peladas,PELADA_FIELDS,peladaValues(prepared.pelada,peladaId,ownerId));
+  return {...reply(201,'PELADA_CRIADA','Pelada criada.',{participante_id:ownerId,pelada_id:peladaId}),requests};
+ }catch{return reply(503,'DADOS_INCOMPATIVEIS','Não foi possível confirmar a criação. Confira JOGADORES, PELADAS e os marcadores antes de repetir.');}
 }
 function planSession(prepared,snapshot,hashes,nowMs) {
  const result=plan(prepared,snapshot,hashes,nowMs);
  if(result.status!==200 || !result.response.autenticado)return result;
  try {
-  if(result.response.papel_administrativo!=='OWNER')return reply(403,'ACESSO_RESTRITO','Este painel é exclusivo do organizador.');
   const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
   const owners=players.filter(r=>r.participante_id===result.response.participante_id);
   if(owners.length!==1)throw new Error('owner');
-  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS).filter(r=>r.pelada_id===owners[0].pelada_id && r.owner_id===owners[0].participante_id);
-  if(clubs.length!==1)throw new Error('club');
-  const p=readPelada(clubs[0]);
-  return {...result,response:{...result.response,pelada:p,total_jogadores:players.filter(r=>r.pelada_id===p.id && ['MENSALISTA','DIARISTA'].includes(String(r.categoria).toUpperCase()) && r.situacao==='ativo').length}};
- }catch{return reply(503,'PELADA_INDISPONIVEL','Não foi possível carregar a pelada vinculada ao organizador.');}
+  const rows=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);
+  if(new Set(rows.map(c=>c.pelada_id)).size!==rows.length)throw new Error('duplicate_club');
+  const user=owners[0];
+  const role=String(user.papel_administrativo).trim().toUpperCase();
+  if(!['OWNER','ADMIN',''].includes(role) || (!role && !['MENSALISTA','DIARISTA'].includes(String(user.categoria).toUpperCase())))return reply(403,'PERFIL_INVALIDO','Perfil não autorizado.');
+  const clubs=rows.filter(r=>r.situacao==='ativo' && (role==='OWNER'?r.owner_id===user.participante_id:r.pelada_id===user.pelada_id));
+  const selected=prepared.selectedPelada || clubs.find(c=>c.pelada_id===owners[0].pelada_id)?.pelada_id || clubs[0]?.pelada_id;
+  const club=clubs.find(c=>c.pelada_id===selected);
+  if(prepared.selectedPelada && !club)return reply(403,'PELADA_NAO_AUTORIZADA','Você não administra essa pelada.');
+  const p=club?readPelada(club):null;
+  if(!p && role!=='OWNER')return reply(403,'PELADA_NAO_AUTORIZADA','Você não possui vínculo ativo com uma pelada.');
+  const admin=role==='OWNER'||role==='ADMIN';
+  return {...result,response:{...result.response,papel_administrativo:role,versao_acesso:2,permissoes:{criar_pelada:role==='OWNER',administrar:admin},meu_cadastro:publicProfile(user),peladas:clubs.map(readPelada),pelada:p,...(admin?{total_jogadores:p?players.filter(r=>r.pelada_id===p.id && ['MENSALISTA','DIARISTA'].includes(String(r.categoria).toUpperCase()) && r.situacao==='ativo').length:0}:{})}};
+ }catch{return reply(503,'PELADA_INDISPONIVEL','Não foi possível carregar as peladas do organizador.');}
+}
+// Somente o titular autenticado. Nenhum campo de permissão, senha ou financeiro é editável.
+function publicProfile(user) {
+ return {nome:user.nome,cpf:user.cpf,apelido:user.apelido,telefone:user.telefone,email:user.email,contato_editavel:!String(user.asaas_customer_id).trim()};
+}
+function prepareProfile(request,config) {
+ const p=prepareSession(request,config);
+ if(!p.canRun)return p;
+ const body=request.body;
+ if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['apelido','telefone','email'].includes(k)) || typeof body.apelido!=='string' || !body.apelido.trim() || body.apelido.length>40 || typeof body.telefone!=='string' || !/^\d{10,13}$/.test(digits(body.telefone)) || typeof body.email!=='string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email) || body.email.length>254)return {...reply(400,'DADOS_INVALIDOS','Confira apelido, telefone e e-mail. Apenas esses campos são aceitos.'),canRun:false};
+ return {...p,profileUpdate:{apelido:body.apelido.trim(),telefone:digits(body.telefone),email:body.email.trim().toLowerCase()}};
+}
+function planProfile(prepared,snapshot,hashes,nowMs) {
+ if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Confira os dados pessoais.');
+ const access=plan(prepared,snapshot,hashes,nowMs);
+ if(access.status!==200 || !access.response.autenticado)return access;
+ try {
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const found=players.filter(r=>r.participante_id===access.response.participante_id);
+  if(found.length!==1)throw new Error('identity');
+  const user=found[0],update=prepared.profileUpdate;
+  if(!update)throw new Error('input');
+  const linked=Boolean(String(user.asaas_customer_id).trim());
+  if(linked && (update.telefone!==digits(user.telefone) || update.email!==String(user.email).toLowerCase().trim()))return reply(409,'CONTATO_VINCULADO_ASAAS','Telefone e e-mail vinculados ao Asaas estão disponíveis somente para consulta nesta etapa.');
+  const raw=snapshot.valueRanges[0].values;
+  const row=raw.findIndex((r,i)=>i>0 && r[0]===user.participante_id);
+  if(row<1)throw new Error('row');
+  const requests=[...access.requests];
+  const fields={...(linked?{apelido:update.apelido}:update),atualizado_em:new Date(nowMs).toISOString()};
+  for(const [key,value] of Object.entries(fields))requests.push({updateCells:{start:{sheetId:prepared.config.gid_jogadores,rowIndex:row,columnIndex:PLAYER_FIELDS.indexOf(key)},rows:[{values:[{userEnteredValue:{stringValue:value}}]}],fields:'userEnteredValue'}});
+  return {...reply(200,'CADASTRO_ATUALIZADO','Seus dados foram atualizados.',{meu_cadastro:publicProfile({...user,...fields})}),requests};
+ }catch{return reply(503,'CADASTRO_INDISPONIVEL','Não foi possível confirmar a atualização. Consulte seu cadastro antes de repetir.');}
 }

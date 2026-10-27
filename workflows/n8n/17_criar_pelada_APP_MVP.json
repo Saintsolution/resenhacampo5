@@ -1,0 +1,650 @@
+{
+  "name": "RC5 — criar pelada autenticada — MVP legado",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rc5-app-v1/peladas",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://resenhacampo5.netlify.app"
+        }
+      },
+      "id": "f7e3383f-6721-5184-8d8a-5544c5d64f9f",
+      "name": "Webhook do aplicativo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        200
+      ],
+      "webhookId": "94b99ed2-ac2a-59e9-92fc-40c4033f1be5"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resenha Campo 5: compatibilidade SHA256 legada solicitada. Limitação de senha documentada.\n// Sem imports, require, rede, logs ou implementação de primitivas criptográficas.\n// Hashes/randômicos são fornecidos pelos nós Crypto nativos, SOMENTE para fixtures.\nconst PLAYER_FIELDS = ['participante_id','pelada_id','nome','apelido','cpf','telefone','email','categoria','papel_administrativo','situacao','asaas_customer_id','convidado_por_id','convidado_por_nome','criado_em','atualizado_em','senha_hash','token_sessao_hash','token_expira'];\nconst TOKEN_FIELDS = ['token_hash','tipo_usuario','id_usuario','finalidade','expira_em','utilizado_em'];\nconst RATE_FIELDS = ['chave','acao','janela_inicio','contador','bloqueado_ate'];\nfunction reply(status, codigo, mensagem, extra = {}) {\n  return { status, response: { sucesso: status < 400, codigo, mensagem, modo: 'MVP_LEGADO', ...extra }, requests: [], mail: null };\n}\nfunction digits(value) { return String(value ?? '').replace(/\\D/g, ''); }\nfunction validCpf(cpf) {\n  if (!/^\\d{11}$/.test(cpf) || /^(\\d)\\1{10}$/.test(cpf)) return false;\n  function digit(base) {\n    let sum = 0;\n    for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (base.length + 1 - i);\n    const rest = sum % 11;\n    return rest < 2 ? 0 : 11 - rest;\n  }\n  return digit(cpf.slice(0, 9)) === Number(cpf[9]) && digit(cpf.slice(0, 10)) === Number(cpf[10]);\n}\nfunction prepare(action, request, config) {\n  const blocked = reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração dos webhooks no n8n.');\n  if ((!/^https:\\/\\//.test(config.origem) && !/^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(config.origem)) || config.origem.includes('CONFIGURAR_') || [config.gid_jogadores,config.gid_tokens,config.gid_limites].some(id=>!Number.isInteger(id)||id<0)) return {...blocked,canRun:false};\n  const headers = Object.fromEntries(Object.entries(request.headers ?? {}).map(([k,v]) => [k.toLowerCase(),v]));\n  // O Header Auth gerenciado protege antes deste nó. Origem nunca concede identidade.\n  if (headers.origin && headers.origin !== config.origem) return { ...reply(403,'ORIGEM_INVALIDA','Origem não autorizada.'), canRun:false };\n  const body = request.body ?? {};\n  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ...reply(400,'DADOS_INVALIDOS','Formato inválido.'), canRun:false };\n  if (['cadastro_owner','login','primeiro_acesso','recuperar_senha'].includes(action)) {\n    const cpf = digits(body.cpf ?? body.cpf_assoc);\n    if (!validCpf(cpf) || (body.cpf != null && body.cpf_assoc != null && digits(body.cpf) !== digits(body.cpf_assoc))) return { ...reply(400,'DADOS_INVALIDOS','Informe os dados de acesso válidos.'), canRun:false };\n  }\n  const password = String(body.senha ?? body.nova_senha ?? '');\n  if (['cadastro_owner','login','criar_senha','redefinir_senha'].includes(action) && (password.length < (action === 'login' ? 1 : 8) || password.length > 128)) return { ...reply(400,'DADOS_INVALIDOS','Senha fora dos limites permitidos para o teste.'), canRun:false };\n  let profile = null;\n  if(action==='cadastro_owner') {\n    if(typeof body.senha!=='string' || body.senha!==body.confirmacao_senha || typeof body.nome!=='string' || body.nome.trim().split(/\\s+/).length<2 || body.nome.length>150 || typeof body.email!=='string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(body.email) || body.email.length>254 || typeof body.telefone!=='string' || !/^\\d{10,13}$/.test(digits(body.telefone))) return {...reply(400,'DADOS_INVALIDOS','Confira nome completo, CPF, e-mail, telefone e confirmação da senha.'),canRun:false};\n    profile={nome:body.nome.trim(),email:body.email.trim().toLowerCase(),telefone:digits(body.telefone)};\n  }\n  const bearer = String(headers.authorization ?? '').match(/^Bearer ([a-fA-F0-9]{64})$/);\n  const token = ['sessao','logout'].includes(action) ? (bearer?.[1] ?? '') : String(body.token ?? '').trim();\n  if (['criar_senha','redefinir_senha','sessao'].includes(action) && !/^[a-fA-F0-9]{64}$/.test(token)) return { ...reply(action === 'sessao' ? 401 : 400,'TOKEN_INVALIDO','Token ausente ou inválido.'), canRun:false };\n  return { canRun:true, action, config, cpf:digits(body.cpf ?? body.cpf_assoc), password, token, profile };\n}\nfunction plan(prepared, snapshot, hashes, nowMs) {\n  const now = new Date(nowMs).toISOString();\n  const config = prepared.config;\n  const action = prepared.action;\n  const output = reply(503,'DADOS_INCOMPATIVEIS','Estrutura de homologação indisponível.');\n  try {\n    if (!prepared.canRun) return output;\n    function table(index, name, required, gid) {\n      const raw = snapshot.valueRanges?.[index];\n      if (!raw || !String(raw.range ?? '').replace(/'/g, '').startsWith(name + '!')) throw new Error('schema');\n      const values = raw.values ?? [];\n      const header = values[0] ?? [];\n      if (required.some(key => !header.includes(key)) || new Set(header).size !== header.length || values.length > 5001) throw new Error('schema');\n      return { header, gid, rows: values.slice(1).map((cells,i) => ({ index:i + 1, values:Object.fromEntries(header.map((key,col) => [key,cells[col] ?? ''])) })).filter(row => Object.values(row.values).some(value => value !== '')) };\n    }\n    const players = table(0,'JOGADORES',PLAYER_FIELDS,config.gid_jogadores);\n    const tokens = table(1,'TOKENS_ACESSO',TOKEN_FIELDS,config.gid_tokens);\n    const rates = table(2,'LIMITES_AUTH',RATE_FIELDS,config.gid_limites);\n    const scope = players.rows;\n    if (new Set(scope.map(row => row.values.participante_id)).size !== scope.length || new Set(scope.map(row => digits(row.values.cpf))).size !== scope.length) throw new Error('duplicate_identity');\n    const requests = [];\n    function cell(value) { return { userEnteredValue:typeof value === 'number' ? {numberValue:value} : {stringValue:String(value ?? '')} }; }\n    function update(tab,row,values) {\n      for (const [key,value] of Object.entries(values)) {\n        const col = tab.header.indexOf(key);\n        if (col < 0) throw new Error('schema');\n        requests.push({ updateCells:{start:{sheetId:tab.gid,rowIndex:row.index,columnIndex:col},rows:[{values:[cell(value)]}],fields:'userEnteredValue'} });\n      }\n    }\n    function append(tab,values) { requests.push({appendCells:{sheetId:tab.gid,rows:[{values:tab.header.map(key => cell(values[key] ?? ''))}],fields:'userEnteredValue'}}); }\n    const live = row => String(row.values.utilizado_em ?? '').trim() === '' && Number.isFinite(Date.parse(row.values.expira_em)) && Date.parse(row.values.expira_em) > nowMs;\n    const finish = response => ({ ...response,requests,mail:response.mail ?? null });\n    // Limite GLOBAL por ação, persistente na cópia de teste. Não é defesa pública por IP.\n    function limit(key,max) {\n      const matching = rates.rows.filter(row => row.values.chave === key);\n      if (matching.length > 1) throw new Error('duplicate_limit');\n      const row = matching[0];\n      const start = row ? Date.parse(row.values.janela_inicio) : NaN;\n      const inWindow = Number.isFinite(start) && start <= nowMs && nowMs - start < 900000;\n      const count = inWindow ? Number(row.values.contador) : 0;\n      if (!Number.isInteger(count) || count < 0) throw new Error('invalid_limit');\n      if (count >= max) return false;\n      const values = {chave:key,acao:action,janela_inicio:inWindow ? row.values.janela_inicio : now,contador:count+1,bloqueado_ate:count+1 >= max ? new Date((inWindow ? start : nowMs)+900000).toISOString() : ''};\n      if (row) update(rates,row,values); else append(rates,values);\n      return true;\n    }\n    if (!limit('MVP_GLOBAL:'+action,30)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n    const player = scope.find(row => digits(row.values.cpf) === prepared.cpf);\n    const eligible = row => row && row.values.situacao === 'ativo';\n    const credentialFailure = () => finish(reply(401,'CREDENCIAIS_INVALIDAS','Não foi possível validar o acesso.'));\n    const shaFormat = value => /^[a-f0-9]{64}$/i.test(String(value ?? ''));\n    if(action==='cadastro_owner') {\n      if(players.rows.some(row=>String(row.values.papel_administrativo).trim().toUpperCase()==='OWNER')) return finish(reply(409,'OWNER_JA_EXISTE','O organizador já foi cadastrado. Faça login.'));\n      if(player) return finish(reply(409,'CADASTRO_EXISTENTE','Já existe um cadastro para esses dados.'));\n      if(!shaFormat(hashes.passwordHash)||!shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      // Mesmo ID de named range em todas as tentativas: inclusão no mesmo lote do OWNER.\n      requests.push({addNamedRange:{namedRange:{namedRangeId:'rc5_owner_bootstrap_v1',name:'RC5_OWNER_CADASTRADO',range:{sheetId:config.gid_jogadores,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});\n      append(players,{...prepared.profile,participante_id:'OWNER_'+hashes.candidate,pelada_id:config.pelada_id,cpf:prepared.cpf,apelido:prepared.profile.nome.split(/\\s+/)[0],categoria:'',papel_administrativo:'OWNER',situacao:'ativo',criado_em:now,atualizado_em:now,senha_hash:hashes.passwordHash});\n      return finish(reply(201,'OWNER_CADASTRADO','Organizador cadastrado. Entre com seu CPF e senha.',{proxima_acao:'login'}));\n    }\n    if (action === 'login') {\n      if (player && !limit('MVP_LOGIN:'+player.values.participante_id,5)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n      if (!eligible(player) || !shaFormat(hashes.passwordHash) || !shaFormat(player.values.senha_hash) || player.values.senha_hash !== hashes.passwordHash) return credentialFailure();\n      if (!shaFormat(hashes.candidate) || !shaFormat(hashes.candidateHash)) throw new Error('native_crypto');\n      const expires = new Date(nowMs+28800000).toISOString();\n      update(players,player,{token_sessao_hash:hashes.candidateHash,token_expira:expires,atualizado_em:now});\n      return finish(reply(200,'LOGIN_AUTORIZADO','Acesso autorizado.',{autenticado:true,token_sessao:hashes.candidate,expira_em:expires,participante_id:player.values.participante_id}));\n    }\n    if (action === 'sessao' || action === 'logout') {\n      const found = prepared.token ? scope.filter(row => row.values.token_sessao_hash && row.values.token_sessao_hash === hashes.tokenHash) : [];\n      if (found.length > 1) throw new Error('duplicate_session');\n      const row = found[0];\n      if (action === 'logout') {\n        if (row) update(players,row,{token_sessao_hash:'',token_expira:'',atualizado_em:now});\n        return finish(reply(200,'SESSAO_REVOGADA','Sessão encerrada.',{autenticado:false}));\n      }\n      if (!eligible(row) || !Number.isFinite(Date.parse(row.values.token_expira)) || Date.parse(row.values.token_expira) <= nowMs) return credentialFailure();\n      return finish(reply(200,'SESSAO_VALIDA','Sessão válida.',{autenticado:true,participante_id:row.values.participante_id,nome:row.values.nome,categoria:row.values.categoria,papel_administrativo:row.values.papel_administrativo,expira_em:row.values.token_expira}));\n    }\n    if (action === 'primeiro_acesso' || action === 'recuperar_senha') {\n      const generic = reply(202,'SOLICITACAO_RECEBIDA','Se houver cadastro elegível, as instruções serão encaminhadas.');\n      if (!eligible(player) || (action === 'primeiro_acesso' ? String(player.values.senha_hash).trim() !== '' : String(player.values.senha_hash).trim() === '')) return finish(generic);\n      const purpose = action === 'primeiro_acesso' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const related = tokens.rows.filter(row => row.values.id_usuario === player.values.participante_id && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (action === 'primeiro_acesso' && related.some(live)) return finish(generic);\n      if (!shaFormat(hashes.candidateHash) || !shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      for (const row of related.filter(row => String(row.values.utilizado_em).trim() === '')) update(tokens,row,{utilizado_em:now});\n      append(tokens,{token_hash:hashes.candidateHash,tipo_usuario:'JOGADOR',id_usuario:player.values.participante_id,finalidade:purpose,expira_em:new Date(nowMs+(purpose === 'CRIAR_SENHA' ? 1800000 : 900000)).toISOString(),utilizado_em:''});\n      // Endereços .invalid são deliberadamente não entregáveis. Trocar somente em revisão futura.\n      generic.mail = {to:player.values.email,subject:'Resenha Campo 5 — TESTE FICTÍCIO',text:'Somente ensaio estrutural. '+config.origem+(purpose === 'CRIAR_SENHA' ? '/criar-senha' : '/redefinir-senha')+'#token='+hashes.candidate};\n      return finish(generic);\n    }\n    if (action === 'criar_senha' || action === 'redefinir_senha') {\n      const purpose = action === 'criar_senha' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const matching = tokens.rows.filter(row => row.values.token_hash === hashes.tokenHash && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (matching.length !== 1 || !live(matching[0])) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      const row = scope.find(candidate => candidate.values.participante_id === matching[0].values.id_usuario);\n      if (!eligible(row) || (action === 'criar_senha' && String(row.values.senha_hash).trim() !== '')) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      if (!shaFormat(hashes.passwordHash)) throw new Error('native_crypto');\n      update(players,row,{senha_hash:hashes.passwordHash,token_sessao_hash:'',token_expira:'',atualizado_em:now});\n      for (const tokenRow of tokens.rows.filter(item => item.values.id_usuario === row.values.participante_id && ['CRIAR_SENHA','REDEFINIR_SENHA'].includes(item.values.finalidade) && String(item.values.utilizado_em).trim() === '')) update(tokens,tokenRow,{utilizado_em:now});\n      return finish(reply(200,'SENHA_FICTICIA_DEFINIDA','Senha de teste definida; nenhuma sessão foi iniciada.',{proxima_acao:'login'}));\n    }\n    return finish(reply(400,'ACAO_INVALIDA','Ação não reconhecida.'));\n  } catch {\n    // Nenhum corpo de requisição, segredo ou mensagem de biblioteca é refletido.\n    return output;\n  }\n}\n\n// Estrutura real de PELADAS. CONFIG não é lida nem alterada por este fluxo.\nconst PELADA_FIELDS=['pelada_id','nome','local','dia_semana','hora_inicio','hora_fim','mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso','vencimento_dia','convite_horas','owner_id','situacao'];\nfunction peladaValid(p) {\n return p && ['nome','local','cidade'].every(k=>typeof p[k]==='string' && p[k].trim().length>0 && p[k].length<=150)\n && Number.isInteger(p.dia_semana) && p.dia_semana>=0 && p.dia_semana<=6\n && ['horario_inicio','horario_fim'].every(k=>typeof p[k]==='string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(p[k])) && p.horario_fim>p.horario_inicio\n && ['mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso'].every(k=>typeof p[k]==='number' && Number.isFinite(p[k]) && p[k]>=0 && p[k]<=100000 && Math.abs(p[k]*100-Math.round(p[k]*100))<0.000001)\n && Number.isInteger(p.vencimento_mensal) && p.vencimento_mensal>=1 && p.vencimento_mensal<=28\n && Number.isInteger(p.validade_convite_horas) && p.validade_convite_horas>=1 && p.validade_convite_horas<=720;\n}\nfunction readTable(snapshot,index,name,fields) {\n const t=snapshot.valueRanges?.[index];const values=t?.values;\n if(!t || !String(t.range??'').replace(/'/g,'').startsWith(name+'!') || !Array.isArray(values) || fields.some((k,i)=>values[0]?.[i]!==k) || values.length>5001) throw new Error('schema');\n return values.slice(1).filter(r=>r.some(v=>String(v??'').trim())).map(r=>Object.fromEntries(fields.map((k,i)=>[k,r[i]??''])));\n}\nfunction localComCidade(p) {return p.local.toLowerCase().includes(p.cidade.trim().toLowerCase())?p.local.trim():p.local.trim()+' — '+p.cidade.trim();}\nfunction peladaValues(p,id,owner) {\n return {pelada_id:id,nome:p.nome.trim(),local:localComCidade(p),dia_semana:p.dia_semana,hora_inicio:p.horario_inicio,hora_fim:p.horario_fim,mensalidade:p.mensalidade,diaria_sem_colete:p.diaria_sem_colete,diaria_com_colete:p.diaria_com_colete,colete_avulso:p.colete_avulso,vencimento_dia:p.vencimento_mensal,convite_horas:p.validade_convite_horas,owner_id:owner,situacao:'ativo'};\n}\nfunction readPelada(row) {\n const p={id:row.pelada_id,nome:row.nome,local:row.local,cidade:'',dia_semana:Number(row.dia_semana),horario_inicio:row.hora_inicio,horario_fim:row.hora_fim,mensalidade:Number(row.mensalidade),diaria_sem_colete:Number(row.diaria_sem_colete),diaria_com_colete:Number(row.diaria_com_colete),colete_avulso:Number(row.colete_avulso),vencimento_mensal:Number(row.vencimento_dia),validade_convite_horas:Number(row.convite_horas)};\n if(!peladaValid({...p,cidade:'cidade no local'}) || row.situacao!=='ativo')throw new Error('pelada_invalid');\n return p;\n}\nfunction selectedPelada(request) {\n const value=request.query?.pelada_id ?? request.body?.pelada_id ?? '';\n return typeof value==='string' && value.length<=150 && (!value || /^[A-Za-z0-9_-]+$/.test(value)) ? value : null;\n}\nfunction prepareSession(request,config) {\n const p=prepare('sessao',request,config),selected=selectedPelada(request);\n return selected===null?{...reply(400,'PELADA_INVALIDA','Seleção inválida.'),canRun:false}:{...p,selectedPelada:selected};\n}\nfunction prepareBootstrap(request,config,authenticated=false) {\n const body=request.body;\n const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));\n const key=String(headers['idempotency-key']??'').toLowerCase();\n const bad=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados da pelada e da operação.'),canRun:false});\n if(!body || typeof body!=='object' || Array.isArray(body) || !peladaValid(body.pelada) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(key))return bad();\n if(!Number.isInteger(config.gid_peladas)||config.gid_peladas<0)return {...reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração da planilha.'),canRun:false};\n if(authenticated)return {...prepare('sessao',request,config),authenticated:true,pelada:body.pelada,requestId:key};\n const o=body.organizador;\n if(!o || !['','Mensalista','Diarista'].includes(o.categoria??'') || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40)return bad();\n const p=prepare('cadastro_owner',{...request,body:o},config);\n return {...p,profile:p.profile?{...p.profile,apelido:o.apelido.trim(),categoria:o.categoria??''}:null,pelada:body.pelada,requestId:key};\n}\nfunction planBootstrap(prepared,snapshot,hashes,nowMs) {\n try {\n  if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Operação inválida.');\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);\n  if(!Array.isArray(snapshot.namedRanges) || new Set(clubs.map(c=>c.pelada_id)).size!==clubs.length)throw new Error('metadata');\n  const byId=id=>players.filter(r=>r.participante_id===id);\n  let owner;\n  let authRequests=[];\n  if(prepared.authenticated) {\n   const access=plan(prepared,snapshot,hashes,nowMs);\n   if(access.status!==200 || !access.response.autenticado)return access;\n   authRequests=access.requests;\n   const found=byId(access.response.participante_id);\n   if(found.length!==1)throw new Error('identity');\n   owner=found[0];\n   if(String(owner.papel_administrativo).toUpperCase()!=='OWNER')return reply(403,'ACESSO_RESTRITO','Somente o OWNER pode criar peladas.');\n  } else {\n   const found=players.filter(r=>digits(r.cpf)===prepared.cpf);\n   if(found.length>1)throw new Error('identity');\n   owner=found[0];\n  }\n  const claimId='rc5_club_req_'+prepared.requestId.replace(/-/g,'_');\n  const markers=snapshot.namedRanges.filter(r=>r.namedRangeId===claimId);\n  // Compatibilidade de repetição com o bootstrap antigo, sem bloqueio global.\n  const legacy=snapshot.namedRanges.find(r=>r.namedRangeId==='rc5_owner_bootstrap_v1' && r.name==='RC5_OWNER_'+prepared.requestId.replace(/-/g,'_'));\n  if(markers.length>1)throw new Error('marker');\n  const marker=markers[0];\n  if(marker || legacy) {\n   const club=marker?clubs.find(c=>'RC5_CLUB_'+c.pelada_id===marker.name):clubs.find(c=>owner && c.pelada_id===owner.pelada_id && c.owner_id===owner.participante_id);\n   const profileMatches=prepared.authenticated || owner && owner.senha_hash===hashes.passwordHash && ['nome','email','telefone','apelido','categoria'].every(k=>owner[k]===prepared.profile[k]);\n   const same=owner && String(owner.papel_administrativo).toUpperCase()==='OWNER' && owner.situacao==='ativo' && club && club.owner_id===owner.participante_id && profileMatches && Object.entries(peladaValues(prepared.pelada,club.pelada_id,owner.participante_id)).every(([k,v])=>String(club[k])===String(v));\n   return same?reply(200,'PELADA_CRIADA','Pelada já criada.',{participante_id:owner.participante_id,pelada_id:club.pelada_id}):reply(409,'REQUISICAO_DIVERGENTE','Operação já utilizada. Confira o cadastro antes de repetir.');\n  }\n  if(!prepared.authenticated && owner)return reply(409,'CADASTRO_EXISTENTE','Faça login para criar outra pelada.');\n  if(!/^[a-f0-9]{64}$/i.test(hashes.candidate))throw new Error('crypto');\n  const peladaId='PELADA_'+hashes.candidate;\n  if(clubs.some(c=>c.pelada_id===peladaId))throw new Error('collision');\n  const ownerId=owner?.participante_id || 'OWNER_'+hashes.candidate;\n  if(!owner && byId(ownerId).length)throw new Error('collision');\n  const requests=[...authRequests];\n  const cell=v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v??'')}});\n  const append=(gid,fields,row)=>requests.push({appendCells:{sheetId:gid,rows:[{values:fields.map(k=>cell(row[k]))}],fields:'userEnteredValue'}});\n  const claim=(id,name,gid)=>requests.push({addNamedRange:{namedRange:{namedRangeId:id,name,range:{sheetId:gid,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});\n  claim(claimId,'RC5_CLUB_'+peladaId,prepared.config.gid_peladas);\n  if(!owner) {\n   if(!/^[a-f0-9]{64}$/i.test(hashes.passwordHash)||!/^[a-f0-9]{64}$/i.test(hashes.cpfHash))throw new Error('crypto');\n   const cpfClaim='rc5_owner_cpf_'+hashes.cpfHash;\n   if(snapshot.namedRanges.some(r=>r.namedRangeId===cpfClaim))return reply(409,'CADASTRO_EXISTENTE','Confira o cadastro existente antes de repetir.');\n   claim(cpfClaim,'RC5_OWNER_CPF_'+hashes.cpfHash,prepared.config.gid_jogadores);\n   const now=new Date(nowMs).toISOString();\n   append(prepared.config.gid_jogadores,PLAYER_FIELDS,{...prepared.profile,participante_id:ownerId,pelada_id:peladaId,cpf:prepared.cpf,papel_administrativo:'OWNER',situacao:'ativo',senha_hash:hashes.passwordHash,criado_em:now,atualizado_em:now});\n  }\n  append(prepared.config.gid_peladas,PELADA_FIELDS,peladaValues(prepared.pelada,peladaId,ownerId));\n  return {...reply(201,'PELADA_CRIADA','Pelada criada.',{participante_id:ownerId,pelada_id:peladaId}),requests};\n }catch{return reply(503,'DADOS_INCOMPATIVEIS','Não foi possível confirmar a criação. Confira JOGADORES, PELADAS e os marcadores antes de repetir.');}\n}\nfunction planSession(prepared,snapshot,hashes,nowMs) {\n const result=plan(prepared,snapshot,hashes,nowMs);\n if(result.status!==200 || !result.response.autenticado)return result;\n try {\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const owners=players.filter(r=>r.participante_id===result.response.participante_id);\n  if(owners.length!==1)throw new Error('owner');\n  const rows=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);\n  if(new Set(rows.map(c=>c.pelada_id)).size!==rows.length)throw new Error('duplicate_club');\n  const user=owners[0];\n  const role=String(user.papel_administrativo).trim().toUpperCase();\n  if(!['OWNER','ADMIN',''].includes(role) || (!role && !['MENSALISTA','DIARISTA'].includes(String(user.categoria).toUpperCase())))return reply(403,'PERFIL_INVALIDO','Perfil não autorizado.');\n  const clubs=rows.filter(r=>r.situacao==='ativo' && (role==='OWNER'?r.owner_id===user.participante_id:r.pelada_id===user.pelada_id));\n  const selected=prepared.selectedPelada || clubs.find(c=>c.pelada_id===owners[0].pelada_id)?.pelada_id || clubs[0]?.pelada_id;\n  const club=clubs.find(c=>c.pelada_id===selected);\n  if(prepared.selectedPelada && !club)return reply(403,'PELADA_NAO_AUTORIZADA','Você não administra essa pelada.');\n  const p=club?readPelada(club):null;\n  if(!p && role!=='OWNER')return reply(403,'PELADA_NAO_AUTORIZADA','Você não possui vínculo ativo com uma pelada.');\n  const admin=role==='OWNER'||role==='ADMIN';\n  return {...result,response:{...result.response,papel_administrativo:role,versao_acesso:2,permissoes:{criar_pelada:role==='OWNER',administrar:admin},meu_cadastro:publicProfile(user),peladas:clubs.map(readPelada),pelada:p,...(admin?{total_jogadores:p?players.filter(r=>r.pelada_id===p.id && ['MENSALISTA','DIARISTA'].includes(String(r.categoria).toUpperCase()) && r.situacao==='ativo').length:0}:{})}};\n }catch{return reply(503,'PELADA_INDISPONIVEL','Não foi possível carregar as peladas do organizador.');}\n}\n// Somente o titular autenticado. Nenhum campo de permissão, senha ou financeiro é editável.\nfunction publicProfile(user) {\n return {nome:user.nome,cpf:user.cpf,apelido:user.apelido,telefone:user.telefone,email:user.email,contato_editavel:!String(user.asaas_customer_id).trim()};\n}\nfunction prepareProfile(request,config) {\n const p=prepareSession(request,config);\n if(!p.canRun)return p;\n const body=request.body;\n if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['apelido','telefone','email'].includes(k)) || typeof body.apelido!=='string' || !body.apelido.trim() || body.apelido.length>40 || typeof body.telefone!=='string' || !/^\\d{10,13}$/.test(digits(body.telefone)) || typeof body.email!=='string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(body.email) || body.email.length>254)return {...reply(400,'DADOS_INVALIDOS','Confira apelido, telefone e e-mail. Apenas esses campos são aceitos.'),canRun:false};\n return {...p,profileUpdate:{apelido:body.apelido.trim(),telefone:digits(body.telefone),email:body.email.trim().toLowerCase()}};\n}\nfunction planProfile(prepared,snapshot,hashes,nowMs) {\n if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Confira os dados pessoais.');\n const access=plan(prepared,snapshot,hashes,nowMs);\n if(access.status!==200 || !access.response.autenticado)return access;\n try {\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const found=players.filter(r=>r.participante_id===access.response.participante_id);\n  if(found.length!==1)throw new Error('identity');\n  const user=found[0],update=prepared.profileUpdate;\n  if(!update)throw new Error('input');\n  const linked=Boolean(String(user.asaas_customer_id).trim());\n  if(linked && (update.telefone!==digits(user.telefone) || update.email!==String(user.email).toLowerCase().trim()))return reply(409,'CONTATO_VINCULADO_ASAAS','Telefone e e-mail vinculados ao Asaas estão disponíveis somente para consulta nesta etapa.');\n  const raw=snapshot.valueRanges[0].values;\n  const row=raw.findIndex((r,i)=>i>0 && r[0]===user.participante_id);\n  if(row<1)throw new Error('row');\n  const requests=[...access.requests];\n  const fields={...(linked?{apelido:update.apelido}:update),atualizado_em:new Date(nowMs).toISOString()};\n  for(const [key,value] of Object.entries(fields))requests.push({updateCells:{start:{sheetId:prepared.config.gid_jogadores,rowIndex:row,columnIndex:PLAYER_FIELDS.indexOf(key)},rows:[{values:[{userEnteredValue:{stringValue:value}}]}],fields:'userEnteredValue'}});\n  return {...reply(200,'CADASTRO_ATUALIZADO','Seus dados foram atualizados.',{meu_cadastro:publicProfile({...user,...fields})}),requests};\n }catch{return reply(503,'CADASTRO_INDISPONIVEL','Não foi possível confirmar a atualização. Consulte seu cadastro antes de repetir.');}\n}\n\nconst config={\"spreadsheet_id\": \"1dRBMU7BH9PLzWjgAjj4VWnLUqpSVIWC6iKQj9URczMo\", \"gid_jogadores\": 800101, \"gid_tokens\": 2023862256, \"gid_limites\": 1685501295, \"gid_peladas\": 717198779, \"origem\": \"https://resenhacampo5.netlify.app\"};\nreturn [{json:prepareBootstrap($input.first().json,config,true)}];"
+      },
+      "id": "f2a935f3-f431-5c03-92b8-710a19714478",
+      "name": "Configuração e validação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ],
+      "notesInFlow": true,
+      "notes": "Preencher origem e gid LIMITES_AUTH. Senha SHA256 legada, sem salt/custo. Não confundir com hash adequado."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "Configuração e dados válidos?",
+              "leftValue": "={{ $json.canRun === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "61f5a54f-2668-5fb6-bfdb-314c97eb4b52",
+      "name": "Configuração e dados válidos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $('Configuração e validação').first().json.password || 'SEM_SENHA_NESTA_ACAO' }}",
+        "dataPropertyName": "passwordHash"
+      },
+      "id": "689e5a7c-af28-5364-9e98-1e876e26aa69",
+      "name": "Hash senha legado",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $('Configuração e validação').first().json.token || 'SEM_TOKEN_NESTA_ACAO' }}",
+        "dataPropertyName": "tokenHash"
+      },
+      "id": "a909cf3a-c658-555c-ae6b-09670bd73fc5",
+      "name": "Hash token recebido",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "encodingType": "hex",
+        "stringLength": 64,
+        "dataPropertyName": "candidate"
+      },
+      "id": "397bb3cf-fab1-5f9d-95cf-ff172bfb2f8b",
+      "name": "Token candidato aleatório",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        240,
+        420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $json.candidate }}",
+        "dataPropertyName": "candidateHash"
+      },
+      "id": "45d29c59-f9c6-53c1-a816-67b24e5e5ce0",
+      "name": "Hash token candidato",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        520,
+        420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Configuração e validação').first().json.config.spreadsheet_id + '/values:batchGet?ranges=JOGADORES!A:R&ranges=TOKENS_ACESSO!A:F&ranges=LIMITES_AUTH!A:E&ranges=PELADAS!A:N&valueRenderOption=UNFORMATTED_VALUE' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ce417393-ea8e-524b-b5b8-d30e302ae45e",
+      "name": "Ler registros no Sheets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resenha Campo 5: compatibilidade SHA256 legada solicitada. Limitação de senha documentada.\n// Sem imports, require, rede, logs ou implementação de primitivas criptográficas.\n// Hashes/randômicos são fornecidos pelos nós Crypto nativos, SOMENTE para fixtures.\nconst PLAYER_FIELDS = ['participante_id','pelada_id','nome','apelido','cpf','telefone','email','categoria','papel_administrativo','situacao','asaas_customer_id','convidado_por_id','convidado_por_nome','criado_em','atualizado_em','senha_hash','token_sessao_hash','token_expira'];\nconst TOKEN_FIELDS = ['token_hash','tipo_usuario','id_usuario','finalidade','expira_em','utilizado_em'];\nconst RATE_FIELDS = ['chave','acao','janela_inicio','contador','bloqueado_ate'];\nfunction reply(status, codigo, mensagem, extra = {}) {\n  return { status, response: { sucesso: status < 400, codigo, mensagem, modo: 'MVP_LEGADO', ...extra }, requests: [], mail: null };\n}\nfunction digits(value) { return String(value ?? '').replace(/\\D/g, ''); }\nfunction validCpf(cpf) {\n  if (!/^\\d{11}$/.test(cpf) || /^(\\d)\\1{10}$/.test(cpf)) return false;\n  function digit(base) {\n    let sum = 0;\n    for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (base.length + 1 - i);\n    const rest = sum % 11;\n    return rest < 2 ? 0 : 11 - rest;\n  }\n  return digit(cpf.slice(0, 9)) === Number(cpf[9]) && digit(cpf.slice(0, 10)) === Number(cpf[10]);\n}\nfunction prepare(action, request, config) {\n  const blocked = reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração dos webhooks no n8n.');\n  if ((!/^https:\\/\\//.test(config.origem) && !/^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(config.origem)) || config.origem.includes('CONFIGURAR_') || [config.gid_jogadores,config.gid_tokens,config.gid_limites].some(id=>!Number.isInteger(id)||id<0)) return {...blocked,canRun:false};\n  const headers = Object.fromEntries(Object.entries(request.headers ?? {}).map(([k,v]) => [k.toLowerCase(),v]));\n  // O Header Auth gerenciado protege antes deste nó. Origem nunca concede identidade.\n  if (headers.origin && headers.origin !== config.origem) return { ...reply(403,'ORIGEM_INVALIDA','Origem não autorizada.'), canRun:false };\n  const body = request.body ?? {};\n  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ...reply(400,'DADOS_INVALIDOS','Formato inválido.'), canRun:false };\n  if (['cadastro_owner','login','primeiro_acesso','recuperar_senha'].includes(action)) {\n    const cpf = digits(body.cpf ?? body.cpf_assoc);\n    if (!validCpf(cpf) || (body.cpf != null && body.cpf_assoc != null && digits(body.cpf) !== digits(body.cpf_assoc))) return { ...reply(400,'DADOS_INVALIDOS','Informe os dados de acesso válidos.'), canRun:false };\n  }\n  const password = String(body.senha ?? body.nova_senha ?? '');\n  if (['cadastro_owner','login','criar_senha','redefinir_senha'].includes(action) && (password.length < (action === 'login' ? 1 : 8) || password.length > 128)) return { ...reply(400,'DADOS_INVALIDOS','Senha fora dos limites permitidos para o teste.'), canRun:false };\n  let profile = null;\n  if(action==='cadastro_owner') {\n    if(typeof body.senha!=='string' || body.senha!==body.confirmacao_senha || typeof body.nome!=='string' || body.nome.trim().split(/\\s+/).length<2 || body.nome.length>150 || typeof body.email!=='string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(body.email) || body.email.length>254 || typeof body.telefone!=='string' || !/^\\d{10,13}$/.test(digits(body.telefone))) return {...reply(400,'DADOS_INVALIDOS','Confira nome completo, CPF, e-mail, telefone e confirmação da senha.'),canRun:false};\n    profile={nome:body.nome.trim(),email:body.email.trim().toLowerCase(),telefone:digits(body.telefone)};\n  }\n  const bearer = String(headers.authorization ?? '').match(/^Bearer ([a-fA-F0-9]{64})$/);\n  const token = ['sessao','logout'].includes(action) ? (bearer?.[1] ?? '') : String(body.token ?? '').trim();\n  if (['criar_senha','redefinir_senha','sessao'].includes(action) && !/^[a-fA-F0-9]{64}$/.test(token)) return { ...reply(action === 'sessao' ? 401 : 400,'TOKEN_INVALIDO','Token ausente ou inválido.'), canRun:false };\n  return { canRun:true, action, config, cpf:digits(body.cpf ?? body.cpf_assoc), password, token, profile };\n}\nfunction plan(prepared, snapshot, hashes, nowMs) {\n  const now = new Date(nowMs).toISOString();\n  const config = prepared.config;\n  const action = prepared.action;\n  const output = reply(503,'DADOS_INCOMPATIVEIS','Estrutura de homologação indisponível.');\n  try {\n    if (!prepared.canRun) return output;\n    function table(index, name, required, gid) {\n      const raw = snapshot.valueRanges?.[index];\n      if (!raw || !String(raw.range ?? '').replace(/'/g, '').startsWith(name + '!')) throw new Error('schema');\n      const values = raw.values ?? [];\n      const header = values[0] ?? [];\n      if (required.some(key => !header.includes(key)) || new Set(header).size !== header.length || values.length > 5001) throw new Error('schema');\n      return { header, gid, rows: values.slice(1).map((cells,i) => ({ index:i + 1, values:Object.fromEntries(header.map((key,col) => [key,cells[col] ?? ''])) })).filter(row => Object.values(row.values).some(value => value !== '')) };\n    }\n    const players = table(0,'JOGADORES',PLAYER_FIELDS,config.gid_jogadores);\n    const tokens = table(1,'TOKENS_ACESSO',TOKEN_FIELDS,config.gid_tokens);\n    const rates = table(2,'LIMITES_AUTH',RATE_FIELDS,config.gid_limites);\n    const scope = players.rows;\n    if (new Set(scope.map(row => row.values.participante_id)).size !== scope.length || new Set(scope.map(row => digits(row.values.cpf))).size !== scope.length) throw new Error('duplicate_identity');\n    const requests = [];\n    function cell(value) { return { userEnteredValue:typeof value === 'number' ? {numberValue:value} : {stringValue:String(value ?? '')} }; }\n    function update(tab,row,values) {\n      for (const [key,value] of Object.entries(values)) {\n        const col = tab.header.indexOf(key);\n        if (col < 0) throw new Error('schema');\n        requests.push({ updateCells:{start:{sheetId:tab.gid,rowIndex:row.index,columnIndex:col},rows:[{values:[cell(value)]}],fields:'userEnteredValue'} });\n      }\n    }\n    function append(tab,values) { requests.push({appendCells:{sheetId:tab.gid,rows:[{values:tab.header.map(key => cell(values[key] ?? ''))}],fields:'userEnteredValue'}}); }\n    const live = row => String(row.values.utilizado_em ?? '').trim() === '' && Number.isFinite(Date.parse(row.values.expira_em)) && Date.parse(row.values.expira_em) > nowMs;\n    const finish = response => ({ ...response,requests,mail:response.mail ?? null });\n    // Limite GLOBAL por ação, persistente na cópia de teste. Não é defesa pública por IP.\n    function limit(key,max) {\n      const matching = rates.rows.filter(row => row.values.chave === key);\n      if (matching.length > 1) throw new Error('duplicate_limit');\n      const row = matching[0];\n      const start = row ? Date.parse(row.values.janela_inicio) : NaN;\n      const inWindow = Number.isFinite(start) && start <= nowMs && nowMs - start < 900000;\n      const count = inWindow ? Number(row.values.contador) : 0;\n      if (!Number.isInteger(count) || count < 0) throw new Error('invalid_limit');\n      if (count >= max) return false;\n      const values = {chave:key,acao:action,janela_inicio:inWindow ? row.values.janela_inicio : now,contador:count+1,bloqueado_ate:count+1 >= max ? new Date((inWindow ? start : nowMs)+900000).toISOString() : ''};\n      if (row) update(rates,row,values); else append(rates,values);\n      return true;\n    }\n    if (!limit('MVP_GLOBAL:'+action,30)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n    const player = scope.find(row => digits(row.values.cpf) === prepared.cpf);\n    const eligible = row => row && row.values.situacao === 'ativo';\n    const credentialFailure = () => finish(reply(401,'CREDENCIAIS_INVALIDAS','Não foi possível validar o acesso.'));\n    const shaFormat = value => /^[a-f0-9]{64}$/i.test(String(value ?? ''));\n    if(action==='cadastro_owner') {\n      if(players.rows.some(row=>String(row.values.papel_administrativo).trim().toUpperCase()==='OWNER')) return finish(reply(409,'OWNER_JA_EXISTE','O organizador já foi cadastrado. Faça login.'));\n      if(player) return finish(reply(409,'CADASTRO_EXISTENTE','Já existe um cadastro para esses dados.'));\n      if(!shaFormat(hashes.passwordHash)||!shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      // Mesmo ID de named range em todas as tentativas: inclusão no mesmo lote do OWNER.\n      requests.push({addNamedRange:{namedRange:{namedRangeId:'rc5_owner_bootstrap_v1',name:'RC5_OWNER_CADASTRADO',range:{sheetId:config.gid_jogadores,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});\n      append(players,{...prepared.profile,participante_id:'OWNER_'+hashes.candidate,pelada_id:config.pelada_id,cpf:prepared.cpf,apelido:prepared.profile.nome.split(/\\s+/)[0],categoria:'',papel_administrativo:'OWNER',situacao:'ativo',criado_em:now,atualizado_em:now,senha_hash:hashes.passwordHash});\n      return finish(reply(201,'OWNER_CADASTRADO','Organizador cadastrado. Entre com seu CPF e senha.',{proxima_acao:'login'}));\n    }\n    if (action === 'login') {\n      if (player && !limit('MVP_LOGIN:'+player.values.participante_id,5)) return finish(reply(429,'MUITAS_TENTATIVAS','Aguarde antes de tentar novamente.'));\n      if (!eligible(player) || !shaFormat(hashes.passwordHash) || !shaFormat(player.values.senha_hash) || player.values.senha_hash !== hashes.passwordHash) return credentialFailure();\n      if (!shaFormat(hashes.candidate) || !shaFormat(hashes.candidateHash)) throw new Error('native_crypto');\n      const expires = new Date(nowMs+28800000).toISOString();\n      update(players,player,{token_sessao_hash:hashes.candidateHash,token_expira:expires,atualizado_em:now});\n      return finish(reply(200,'LOGIN_AUTORIZADO','Acesso autorizado.',{autenticado:true,token_sessao:hashes.candidate,expira_em:expires,participante_id:player.values.participante_id}));\n    }\n    if (action === 'sessao' || action === 'logout') {\n      const found = prepared.token ? scope.filter(row => row.values.token_sessao_hash && row.values.token_sessao_hash === hashes.tokenHash) : [];\n      if (found.length > 1) throw new Error('duplicate_session');\n      const row = found[0];\n      if (action === 'logout') {\n        if (row) update(players,row,{token_sessao_hash:'',token_expira:'',atualizado_em:now});\n        return finish(reply(200,'SESSAO_REVOGADA','Sessão encerrada.',{autenticado:false}));\n      }\n      if (!eligible(row) || !Number.isFinite(Date.parse(row.values.token_expira)) || Date.parse(row.values.token_expira) <= nowMs) return credentialFailure();\n      return finish(reply(200,'SESSAO_VALIDA','Sessão válida.',{autenticado:true,participante_id:row.values.participante_id,nome:row.values.nome,categoria:row.values.categoria,papel_administrativo:row.values.papel_administrativo,expira_em:row.values.token_expira}));\n    }\n    if (action === 'primeiro_acesso' || action === 'recuperar_senha') {\n      const generic = reply(202,'SOLICITACAO_RECEBIDA','Se houver cadastro elegível, as instruções serão encaminhadas.');\n      if (!eligible(player) || (action === 'primeiro_acesso' ? String(player.values.senha_hash).trim() !== '' : String(player.values.senha_hash).trim() === '')) return finish(generic);\n      const purpose = action === 'primeiro_acesso' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const related = tokens.rows.filter(row => row.values.id_usuario === player.values.participante_id && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (action === 'primeiro_acesso' && related.some(live)) return finish(generic);\n      if (!shaFormat(hashes.candidateHash) || !shaFormat(hashes.candidate)) throw new Error('native_crypto');\n      for (const row of related.filter(row => String(row.values.utilizado_em).trim() === '')) update(tokens,row,{utilizado_em:now});\n      append(tokens,{token_hash:hashes.candidateHash,tipo_usuario:'JOGADOR',id_usuario:player.values.participante_id,finalidade:purpose,expira_em:new Date(nowMs+(purpose === 'CRIAR_SENHA' ? 1800000 : 900000)).toISOString(),utilizado_em:''});\n      // Endereços .invalid são deliberadamente não entregáveis. Trocar somente em revisão futura.\n      generic.mail = {to:player.values.email,subject:'Resenha Campo 5 — TESTE FICTÍCIO',text:'Somente ensaio estrutural. '+config.origem+(purpose === 'CRIAR_SENHA' ? '/criar-senha' : '/redefinir-senha')+'#token='+hashes.candidate};\n      return finish(generic);\n    }\n    if (action === 'criar_senha' || action === 'redefinir_senha') {\n      const purpose = action === 'criar_senha' ? 'CRIAR_SENHA' : 'REDEFINIR_SENHA';\n      const matching = tokens.rows.filter(row => row.values.token_hash === hashes.tokenHash && row.values.tipo_usuario === 'JOGADOR' && row.values.finalidade === purpose);\n      if (matching.length !== 1 || !live(matching[0])) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      const row = scope.find(candidate => candidate.values.participante_id === matching[0].values.id_usuario);\n      if (!eligible(row) || (action === 'criar_senha' && String(row.values.senha_hash).trim() !== '')) return finish(reply(400,'TOKEN_INVALIDO_OU_EXPIRADO','Link inválido, expirado ou já utilizado.'));\n      if (!shaFormat(hashes.passwordHash)) throw new Error('native_crypto');\n      update(players,row,{senha_hash:hashes.passwordHash,token_sessao_hash:'',token_expira:'',atualizado_em:now});\n      for (const tokenRow of tokens.rows.filter(item => item.values.id_usuario === row.values.participante_id && ['CRIAR_SENHA','REDEFINIR_SENHA'].includes(item.values.finalidade) && String(item.values.utilizado_em).trim() === '')) update(tokens,tokenRow,{utilizado_em:now});\n      return finish(reply(200,'SENHA_FICTICIA_DEFINIDA','Senha de teste definida; nenhuma sessão foi iniciada.',{proxima_acao:'login'}));\n    }\n    return finish(reply(400,'ACAO_INVALIDA','Ação não reconhecida.'));\n  } catch {\n    // Nenhum corpo de requisição, segredo ou mensagem de biblioteca é refletido.\n    return output;\n  }\n}\n\n// Estrutura real de PELADAS. CONFIG não é lida nem alterada por este fluxo.\nconst PELADA_FIELDS=['pelada_id','nome','local','dia_semana','hora_inicio','hora_fim','mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso','vencimento_dia','convite_horas','owner_id','situacao'];\nfunction peladaValid(p) {\n return p && ['nome','local','cidade'].every(k=>typeof p[k]==='string' && p[k].trim().length>0 && p[k].length<=150)\n && Number.isInteger(p.dia_semana) && p.dia_semana>=0 && p.dia_semana<=6\n && ['horario_inicio','horario_fim'].every(k=>typeof p[k]==='string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(p[k])) && p.horario_fim>p.horario_inicio\n && ['mensalidade','diaria_sem_colete','diaria_com_colete','colete_avulso'].every(k=>typeof p[k]==='number' && Number.isFinite(p[k]) && p[k]>=0 && p[k]<=100000 && Math.abs(p[k]*100-Math.round(p[k]*100))<0.000001)\n && Number.isInteger(p.vencimento_mensal) && p.vencimento_mensal>=1 && p.vencimento_mensal<=28\n && Number.isInteger(p.validade_convite_horas) && p.validade_convite_horas>=1 && p.validade_convite_horas<=720;\n}\nfunction readTable(snapshot,index,name,fields) {\n const t=snapshot.valueRanges?.[index];const values=t?.values;\n if(!t || !String(t.range??'').replace(/'/g,'').startsWith(name+'!') || !Array.isArray(values) || fields.some((k,i)=>values[0]?.[i]!==k) || values.length>5001) throw new Error('schema');\n return values.slice(1).filter(r=>r.some(v=>String(v??'').trim())).map(r=>Object.fromEntries(fields.map((k,i)=>[k,r[i]??''])));\n}\nfunction localComCidade(p) {return p.local.toLowerCase().includes(p.cidade.trim().toLowerCase())?p.local.trim():p.local.trim()+' — '+p.cidade.trim();}\nfunction peladaValues(p,id,owner) {\n return {pelada_id:id,nome:p.nome.trim(),local:localComCidade(p),dia_semana:p.dia_semana,hora_inicio:p.horario_inicio,hora_fim:p.horario_fim,mensalidade:p.mensalidade,diaria_sem_colete:p.diaria_sem_colete,diaria_com_colete:p.diaria_com_colete,colete_avulso:p.colete_avulso,vencimento_dia:p.vencimento_mensal,convite_horas:p.validade_convite_horas,owner_id:owner,situacao:'ativo'};\n}\nfunction readPelada(row) {\n const p={id:row.pelada_id,nome:row.nome,local:row.local,cidade:'',dia_semana:Number(row.dia_semana),horario_inicio:row.hora_inicio,horario_fim:row.hora_fim,mensalidade:Number(row.mensalidade),diaria_sem_colete:Number(row.diaria_sem_colete),diaria_com_colete:Number(row.diaria_com_colete),colete_avulso:Number(row.colete_avulso),vencimento_mensal:Number(row.vencimento_dia),validade_convite_horas:Number(row.convite_horas)};\n if(!peladaValid({...p,cidade:'cidade no local'}) || row.situacao!=='ativo')throw new Error('pelada_invalid');\n return p;\n}\nfunction selectedPelada(request) {\n const value=request.query?.pelada_id ?? request.body?.pelada_id ?? '';\n return typeof value==='string' && value.length<=150 && (!value || /^[A-Za-z0-9_-]+$/.test(value)) ? value : null;\n}\nfunction prepareSession(request,config) {\n const p=prepare('sessao',request,config),selected=selectedPelada(request);\n return selected===null?{...reply(400,'PELADA_INVALIDA','Seleção inválida.'),canRun:false}:{...p,selectedPelada:selected};\n}\nfunction prepareBootstrap(request,config,authenticated=false) {\n const body=request.body;\n const headers=Object.fromEntries(Object.entries(request.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));\n const key=String(headers['idempotency-key']??'').toLowerCase();\n const bad=()=>({...reply(400,'DADOS_INVALIDOS','Confira os dados da pelada e da operação.'),canRun:false});\n if(!body || typeof body!=='object' || Array.isArray(body) || !peladaValid(body.pelada) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(key))return bad();\n if(!Number.isInteger(config.gid_peladas)||config.gid_peladas<0)return {...reply(503,'CONFIGURACAO_PENDENTE','Confira a configuração da planilha.'),canRun:false};\n if(authenticated)return {...prepare('sessao',request,config),authenticated:true,pelada:body.pelada,requestId:key};\n const o=body.organizador;\n if(!o || !['','Mensalista','Diarista'].includes(o.categoria??'') || typeof o.apelido!=='string' || !o.apelido.trim() || o.apelido.length>40)return bad();\n const p=prepare('cadastro_owner',{...request,body:o},config);\n return {...p,profile:p.profile?{...p.profile,apelido:o.apelido.trim(),categoria:o.categoria??''}:null,pelada:body.pelada,requestId:key};\n}\nfunction planBootstrap(prepared,snapshot,hashes,nowMs) {\n try {\n  if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Operação inválida.');\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const clubs=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);\n  if(!Array.isArray(snapshot.namedRanges) || new Set(clubs.map(c=>c.pelada_id)).size!==clubs.length)throw new Error('metadata');\n  const byId=id=>players.filter(r=>r.participante_id===id);\n  let owner;\n  let authRequests=[];\n  if(prepared.authenticated) {\n   const access=plan(prepared,snapshot,hashes,nowMs);\n   if(access.status!==200 || !access.response.autenticado)return access;\n   authRequests=access.requests;\n   const found=byId(access.response.participante_id);\n   if(found.length!==1)throw new Error('identity');\n   owner=found[0];\n   if(String(owner.papel_administrativo).toUpperCase()!=='OWNER')return reply(403,'ACESSO_RESTRITO','Somente o OWNER pode criar peladas.');\n  } else {\n   const found=players.filter(r=>digits(r.cpf)===prepared.cpf);\n   if(found.length>1)throw new Error('identity');\n   owner=found[0];\n  }\n  const claimId='rc5_club_req_'+prepared.requestId.replace(/-/g,'_');\n  const markers=snapshot.namedRanges.filter(r=>r.namedRangeId===claimId);\n  // Compatibilidade de repetição com o bootstrap antigo, sem bloqueio global.\n  const legacy=snapshot.namedRanges.find(r=>r.namedRangeId==='rc5_owner_bootstrap_v1' && r.name==='RC5_OWNER_'+prepared.requestId.replace(/-/g,'_'));\n  if(markers.length>1)throw new Error('marker');\n  const marker=markers[0];\n  if(marker || legacy) {\n   const club=marker?clubs.find(c=>'RC5_CLUB_'+c.pelada_id===marker.name):clubs.find(c=>owner && c.pelada_id===owner.pelada_id && c.owner_id===owner.participante_id);\n   const profileMatches=prepared.authenticated || owner && owner.senha_hash===hashes.passwordHash && ['nome','email','telefone','apelido','categoria'].every(k=>owner[k]===prepared.profile[k]);\n   const same=owner && String(owner.papel_administrativo).toUpperCase()==='OWNER' && owner.situacao==='ativo' && club && club.owner_id===owner.participante_id && profileMatches && Object.entries(peladaValues(prepared.pelada,club.pelada_id,owner.participante_id)).every(([k,v])=>String(club[k])===String(v));\n   return same?reply(200,'PELADA_CRIADA','Pelada já criada.',{participante_id:owner.participante_id,pelada_id:club.pelada_id}):reply(409,'REQUISICAO_DIVERGENTE','Operação já utilizada. Confira o cadastro antes de repetir.');\n  }\n  if(!prepared.authenticated && owner)return reply(409,'CADASTRO_EXISTENTE','Faça login para criar outra pelada.');\n  if(!/^[a-f0-9]{64}$/i.test(hashes.candidate))throw new Error('crypto');\n  const peladaId='PELADA_'+hashes.candidate;\n  if(clubs.some(c=>c.pelada_id===peladaId))throw new Error('collision');\n  const ownerId=owner?.participante_id || 'OWNER_'+hashes.candidate;\n  if(!owner && byId(ownerId).length)throw new Error('collision');\n  const requests=[...authRequests];\n  const cell=v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v??'')}});\n  const append=(gid,fields,row)=>requests.push({appendCells:{sheetId:gid,rows:[{values:fields.map(k=>cell(row[k]))}],fields:'userEnteredValue'}});\n  const claim=(id,name,gid)=>requests.push({addNamedRange:{namedRange:{namedRangeId:id,name,range:{sheetId:gid,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:1}}}});\n  claim(claimId,'RC5_CLUB_'+peladaId,prepared.config.gid_peladas);\n  if(!owner) {\n   if(!/^[a-f0-9]{64}$/i.test(hashes.passwordHash)||!/^[a-f0-9]{64}$/i.test(hashes.cpfHash))throw new Error('crypto');\n   const cpfClaim='rc5_owner_cpf_'+hashes.cpfHash;\n   if(snapshot.namedRanges.some(r=>r.namedRangeId===cpfClaim))return reply(409,'CADASTRO_EXISTENTE','Confira o cadastro existente antes de repetir.');\n   claim(cpfClaim,'RC5_OWNER_CPF_'+hashes.cpfHash,prepared.config.gid_jogadores);\n   const now=new Date(nowMs).toISOString();\n   append(prepared.config.gid_jogadores,PLAYER_FIELDS,{...prepared.profile,participante_id:ownerId,pelada_id:peladaId,cpf:prepared.cpf,papel_administrativo:'OWNER',situacao:'ativo',senha_hash:hashes.passwordHash,criado_em:now,atualizado_em:now});\n  }\n  append(prepared.config.gid_peladas,PELADA_FIELDS,peladaValues(prepared.pelada,peladaId,ownerId));\n  return {...reply(201,'PELADA_CRIADA','Pelada criada.',{participante_id:ownerId,pelada_id:peladaId}),requests};\n }catch{return reply(503,'DADOS_INCOMPATIVEIS','Não foi possível confirmar a criação. Confira JOGADORES, PELADAS e os marcadores antes de repetir.');}\n}\nfunction planSession(prepared,snapshot,hashes,nowMs) {\n const result=plan(prepared,snapshot,hashes,nowMs);\n if(result.status!==200 || !result.response.autenticado)return result;\n try {\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const owners=players.filter(r=>r.participante_id===result.response.participante_id);\n  if(owners.length!==1)throw new Error('owner');\n  const rows=readTable(snapshot,3,'PELADAS',PELADA_FIELDS);\n  if(new Set(rows.map(c=>c.pelada_id)).size!==rows.length)throw new Error('duplicate_club');\n  const user=owners[0];\n  const role=String(user.papel_administrativo).trim().toUpperCase();\n  if(!['OWNER','ADMIN',''].includes(role) || (!role && !['MENSALISTA','DIARISTA'].includes(String(user.categoria).toUpperCase())))return reply(403,'PERFIL_INVALIDO','Perfil não autorizado.');\n  const clubs=rows.filter(r=>r.situacao==='ativo' && (role==='OWNER'?r.owner_id===user.participante_id:r.pelada_id===user.pelada_id));\n  const selected=prepared.selectedPelada || clubs.find(c=>c.pelada_id===owners[0].pelada_id)?.pelada_id || clubs[0]?.pelada_id;\n  const club=clubs.find(c=>c.pelada_id===selected);\n  if(prepared.selectedPelada && !club)return reply(403,'PELADA_NAO_AUTORIZADA','Você não administra essa pelada.');\n  const p=club?readPelada(club):null;\n  if(!p && role!=='OWNER')return reply(403,'PELADA_NAO_AUTORIZADA','Você não possui vínculo ativo com uma pelada.');\n  const admin=role==='OWNER'||role==='ADMIN';\n  return {...result,response:{...result.response,papel_administrativo:role,versao_acesso:2,permissoes:{criar_pelada:role==='OWNER',administrar:admin},meu_cadastro:publicProfile(user),peladas:clubs.map(readPelada),pelada:p,...(admin?{total_jogadores:p?players.filter(r=>r.pelada_id===p.id && ['MENSALISTA','DIARISTA'].includes(String(r.categoria).toUpperCase()) && r.situacao==='ativo').length:0}:{})}};\n }catch{return reply(503,'PELADA_INDISPONIVEL','Não foi possível carregar as peladas do organizador.');}\n}\n// Somente o titular autenticado. Nenhum campo de permissão, senha ou financeiro é editável.\nfunction publicProfile(user) {\n return {nome:user.nome,cpf:user.cpf,apelido:user.apelido,telefone:user.telefone,email:user.email,contato_editavel:!String(user.asaas_customer_id).trim()};\n}\nfunction prepareProfile(request,config) {\n const p=prepareSession(request,config);\n if(!p.canRun)return p;\n const body=request.body;\n if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['apelido','telefone','email'].includes(k)) || typeof body.apelido!=='string' || !body.apelido.trim() || body.apelido.length>40 || typeof body.telefone!=='string' || !/^\\d{10,13}$/.test(digits(body.telefone)) || typeof body.email!=='string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(body.email) || body.email.length>254)return {...reply(400,'DADOS_INVALIDOS','Confira apelido, telefone e e-mail. Apenas esses campos são aceitos.'),canRun:false};\n return {...p,profileUpdate:{apelido:body.apelido.trim(),telefone:digits(body.telefone),email:body.email.trim().toLowerCase()}};\n}\nfunction planProfile(prepared,snapshot,hashes,nowMs) {\n if(!prepared.canRun)return reply(400,'DADOS_INVALIDOS','Confira os dados pessoais.');\n const access=plan(prepared,snapshot,hashes,nowMs);\n if(access.status!==200 || !access.response.autenticado)return access;\n try {\n  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);\n  const found=players.filter(r=>r.participante_id===access.response.participante_id);\n  if(found.length!==1)throw new Error('identity');\n  const user=found[0],update=prepared.profileUpdate;\n  if(!update)throw new Error('input');\n  const linked=Boolean(String(user.asaas_customer_id).trim());\n  if(linked && (update.telefone!==digits(user.telefone) || update.email!==String(user.email).toLowerCase().trim()))return reply(409,'CONTATO_VINCULADO_ASAAS','Telefone e e-mail vinculados ao Asaas estão disponíveis somente para consulta nesta etapa.');\n  const raw=snapshot.valueRanges[0].values;\n  const row=raw.findIndex((r,i)=>i>0 && r[0]===user.participante_id);\n  if(row<1)throw new Error('row');\n  const requests=[...access.requests];\n  const fields={...(linked?{apelido:update.apelido}:update),atualizado_em:new Date(nowMs).toISOString()};\n  for(const [key,value] of Object.entries(fields))requests.push({updateCells:{start:{sheetId:prepared.config.gid_jogadores,rowIndex:row,columnIndex:PLAYER_FIELDS.indexOf(key)},rows:[{values:[{userEnteredValue:{stringValue:value}}]}],fields:'userEnteredValue'}});\n  return {...reply(200,'CADASTRO_ATUALIZADO','Seus dados foram atualizados.',{meu_cadastro:publicProfile({...user,...fields})}),requests};\n }catch{return reply(503,'CADASTRO_INDISPONIVEL','Não foi possível confirmar a atualização. Consulte seu cadastro antes de repetir.');}\n}\n\nreturn [{json:planBootstrap($('Configuração e validação').first().json,{...$('Ler registros no Sheets').first().json,namedRanges:$input.first().json.namedRanges??[]},$('Hash CPF cadastro').first().json,Date.now())}];"
+      },
+      "id": "0a0e21dc-71ae-5cf6-97c0-92df9d99a50b",
+      "name": "Planejar operação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "Google batchUpdate é usado porque o node Sheets não agrupa senha e consumo de token em um único pedido. Atomicidade do lote NÃO substitui exclusão entre execuções."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "Há gravações planejadas?",
+              "leftValue": "={{ $json.requests.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fef76985-3c96-57b0-bbec-eb0fbf1a7cbb",
+      "name": "Há gravações planejadas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Configuração e validação').first().json.config.spreadsheet_id + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { requests: $('Planejar operação').first().json.requests, includeSpreadsheetInResponse: false } }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "05c79202-15a5-5f04-bf8b-6d04be3f961b",
+      "name": "Gravar no Sheets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        640
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const expected = $('Planejar operação').first().json;\nconst response = $input.first().json;\nconst id = $('Configuração e validação').first().json.config.spreadsheet_id;\nif (response.spreadsheetId !== id || !Array.isArray(response.replies) || response.replies.length !== expected.requests.length) return [{json:{status:503,response:{sucesso:false,codigo:'RESULTADO_INDETERMINADO',mensagem:'Interrompa os testes e confira o estado da planilha.',modo:'MVP_LEGADO'}}}];\nreturn [{json:expected}];"
+      },
+      "id": "5bb10bbc-d914-5d8b-88ce-d4161c8b6f37",
+      "name": "Conferir confirmação do lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const p=$input.first().json; return [{json:{status:p.status,response:p.response}}];"
+      },
+      "id": "22dcb6ac-1f40-5780-877d-7b54fa5f2965",
+      "name": "Preparar resposta mínima",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{json:{status:503,response:{sucesso:false,codigo:'DEPENDENCIA_INDISPONIVEL',mensagem:'Não foi possível concluir o ensaio. Não repita gravações sem conferir o estado.',modo:'MVP_LEGADO'}}}];"
+      },
+      "id": "1bd1c231-b985-5d6c-a3bb-5ff5f64211c1",
+      "name": "Falha técnica sanitizada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Pragma",
+                "value": "no-cache"
+              },
+              {
+                "name": "Retry-After",
+                "value": "={{ $json.status === 429 ? '900' : '0' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "cdcfdc4b-4198-5fc5-b91a-daf5e1972af2",
+      "name": "Responder sem dados internos",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1360,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "encoding": "hex",
+        "value": "={{ $('Configuração e validação').first().json.cpf || 'SESSAO_OWNER' }}",
+        "dataPropertyName": "cpfHash"
+      },
+      "id": "rc5-bootstrap-cpf-hash",
+      "name": "Hash CPF cadastro",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Configuração e validação').first().json.config.spreadsheet_id + '?fields=namedRanges(namedRangeId,name)' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "rc5-bootstrap-marker-read",
+      "name": "Ler marcador do cadastro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2520,
+        700
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE",
+          "name": "CONFIGURAR_CREDENCIAL_GOOGLE_EXISTENTE"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Webhook do aplicativo": {
+      "main": [
+        [
+          {
+            "node": "Configuração e validação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração e validação": {
+      "main": [
+        [
+          {
+            "node": "Configuração e dados válidos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração e dados válidos?": {
+      "main": [
+        [
+          {
+            "node": "Hash senha legado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash senha legado": {
+      "main": [
+        [
+          {
+            "node": "Hash token recebido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash token recebido": {
+      "main": [
+        [
+          {
+            "node": "Token candidato aleatório",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token candidato aleatório": {
+      "main": [
+        [
+          {
+            "node": "Hash token candidato",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash token candidato": {
+      "main": [
+        [
+          {
+            "node": "Hash CPF cadastro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler registros no Sheets": {
+      "main": [
+        [
+          {
+            "node": "Ler marcador do cadastro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Planejar operação": {
+      "main": [
+        [
+          {
+            "node": "Há gravações planejadas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há gravações planejadas?": {
+      "main": [
+        [
+          {
+            "node": "Gravar no Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar resposta mínima",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar no Sheets": {
+      "main": [
+        [
+          {
+            "node": "Conferir confirmação do lote",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir confirmação do lote": {
+      "main": [
+        [
+          {
+            "node": "Preparar resposta mínima",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar resposta mínima": {
+      "main": [
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha técnica sanitizada": {
+      "main": [
+        [
+          {
+            "node": "Responder sem dados internos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash CPF cadastro": {
+      "main": [
+        [
+          {
+            "node": "Ler registros no Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler marcador do cadastro": {
+      "main": [
+        [
+          {
+            "node": "Planejar operação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha técnica sanitizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 60
+  },
+  "tags": []
+}

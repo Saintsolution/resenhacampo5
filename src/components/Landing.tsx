@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, CalendarDays, Menu, Pause, Play, RotateCcw, ShieldCheck, Users, Volume2, VolumeX, X } from 'lucide-react';
 
-export default function Landing({ onCreate, onLogin, onAdmin, onDemo }: { onCreate: () => void; onLogin: () => void; onAdmin: () => void; onDemo: () => void }) {
+export default function Landing({ onCreate, onLogin, onDemo }: { onCreate: () => void; onLogin: () => void; onDemo: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [menu, setMenu] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -43,7 +43,7 @@ export default function Landing({ onCreate, onLogin, onAdmin, onDemo }: { onCrea
   }
   function browse() { setMenu(false); document.getElementById('peladas-proximas')?.scrollIntoView({ behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start' }); }
   return <div className="welcome-page">
-    <header className="welcome-header"><a className="welcome-wordmark" href="#/" aria-label="Página inicial">RESENHA<span>FUTEBOL ENTRE AMIGOS</span></a><button className="icon-button welcome-menu" onClick={()=>setMenu(v=>!v)} aria-label={menu?'Fechar menu':'Abrir menu'} aria-expanded={menu} aria-controls="welcome-navigation">{menu?<X/>:<Menu/>}</button><nav id="welcome-navigation" className={menu?'is-open':''} aria-label="Navegação inicial"><button onClick={onCreate}>Criar pelada</button><button onClick={onAdmin}>Admin</button><button onClick={onLogin}>Minha pelada</button><button onClick={browse}>Peladas próximas</button></nav></header>
+    <header className="welcome-header"><a className="welcome-wordmark" href="#/" aria-label="Página inicial">RESENHA<span>FUTEBOL ENTRE AMIGOS</span></a><button className="icon-button welcome-menu" onClick={()=>setMenu(v=>!v)} aria-label={menu?'Fechar menu':'Abrir menu'} aria-expanded={menu} aria-controls="welcome-navigation">{menu?<X/>:<Menu/>}</button><nav id="welcome-navigation" className={menu?'is-open':''} aria-label="Navegação inicial"><button onClick={onCreate}>Criar pelada</button><button onClick={onLogin}>Entrar na minha pelada</button><button onClick={browse}>Peladas próximas</button></nav></header>
     <section className="welcome-hero" style={{ backgroundColor:borderColor }} aria-label="Vinheta de abertura Resenha">
       {!failed && <video ref={video} src="/vinheta%20inicio.mp4" muted={muted} playsInline preload="auto" style={{ backgroundColor:borderColor }} onLoadedData={matchVideoBorders} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{matchVideoBorders();setEnded(true);setPlaying(false);}} onError={()=>{setFailed(true);setPlaying(false);}} aria-label="Vinheta de abertura da Resenha"/>}
       {failed && <div className="welcome-video-fallback welcome-video-unavailable" role="status">Resenha · futebol entre amigos</div>}
