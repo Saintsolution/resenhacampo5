@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LogOut } from 'lucide-react';
 import InviteManager from './InviteManager';
 import PersonalDetails from './PersonalDetails';
+import PlayerList from './PlayerList';
 import { nextGameDate, formatGameDate } from '../lib/matchDate';
 import { formatCurrency } from '../lib/utils';
 import type { OwnerSession, PersonalProfile } from '../lib/n8n/owner';
@@ -31,6 +32,7 @@ export default function AccessPanel({ session, token, busy, message, error, onSe
     {tab === 'cadastro' ? session.meu_cadastro ? <PersonalDetails key={session.participante_id} profile={session.meu_cadastro} token={token} onSaved={onProfileSaved}/> : <p role="status">A consulta do cadastro depende da atualização do workflow de sessão.</p> : tab === 'convites' && canInvite ? <InviteManager key={club.id} token={token} club={club} allowAdmin={owner}/> : <>
       <div className="entry-explanation"><strong>{session.papel_administrativo || session.categoria}</strong><span>{club.local}{club.cidade && <><br/>{club.cidade}</>}</span></div>
       <div className="entry-explanation"><strong>Próxima pelada</strong><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}</span>{admin && <strong>{session.total_jogadores ?? '—'} jogadores ativos cadastrados</strong>}</div>
+      {admin && <PlayerList key={club.id} players={session.jogadores} busy={busy} onRefresh={() => onSelect(club.id)}/>}
       <div className="entry-explanation"><strong>Valores da pelada</strong><span>Mensalidade: {formatCurrency(club.mensalidade)}<br/>Diária sem colete: {formatCurrency(club.diaria_sem_colete)}<br/>Diária com colete: {formatCurrency(club.diaria_com_colete)}<br/>Colete avulso: {formatCurrency(club.colete_avulso)}<br/>Vencimento mensal: dia {club.vencimento_mensal}</span></div>
     </>}
     {error && <p role="alert">{error}</p>}

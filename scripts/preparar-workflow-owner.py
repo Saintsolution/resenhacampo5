@@ -67,7 +67,7 @@ def rename(v):
  return v
 for n in w['nodes']:n['name']=mapping.get(n['name'],n['name']);n['parameters']=rename(n['parameters'])
 w['connections']={mapping.get(k,k):{t:[[{**e,'node':mapping.get(e['node'],e['node'])} for e in b] for b in branches] for t,branches in outs.items()} for k,outs in w['connections'].items()}
-w['name']='JogoLindo — OWNER separado, Peladas e Convites';w['active']=False;w['pinData']={}
+w['name']='Resenha Campo 5 — Cadastro, Login, Peladas e Convites';w['active']=False;w['pinData']={}
 for key in ['id','versionId','activeVersionId','activeVersion','createdAt','updatedAt','meta','shared','triggerCount','versionCounter']:w.pop(key,None)
 # Preserva todo ramo não relacionado à mudança, inclusive os nós de boleto/Asaas.
 for old in original['nodes']:
@@ -83,6 +83,12 @@ for old in original['nodes']:
   current['parameters']=back(current['parameters']);assert current==old,old['name']
 assert hashlib.sha256(source.read_bytes()).hexdigest()==hashlib.sha256(raw).hexdigest()
 folder=root/'workflows/para importar';folder.mkdir(exist_ok=True)
-out=folder/'JogoLindo.json';out.write_text(json.dumps(w,ensure_ascii=False,indent=2)+'\n');os.chmod(out,0o600)
+out=folder/'RESENHA_CAMPO_5.json';out.write_text(json.dumps(w,ensure_ascii=False,indent=2)+'\n');os.chmod(out,0o600)
 (folder/'FONTE.sha256').write_text(hashlib.sha256(raw).hexdigest()+'  '+str(source.relative_to(root))+'\n')
 print(json.dumps({'arquivo':str(out.relative_to(root)),'nos':len(w['nodes']),'alterados':sorted(modified),'fonte_preservada':True,'publicado':False},ensure_ascii=False))
+
+# A entrega completa inclui a consulta administrativa, preservando o mesmo grafo.
+from subprocess import run
+import sys
+if (root/'scripts/preparar-lista-jogadores.py').exists():
+ run([sys.executable,str(root/'scripts/preparar-lista-jogadores.py')],check=True)

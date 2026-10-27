@@ -4,6 +4,10 @@ import { n8nBaseUrl } from './config';
 export interface PersonalProfile {
   nome: string; cpf: string; apelido: string; telefone: string; email: string; contato_editavel: boolean;
 }
+export interface AdminPlayer {
+  participante_id: string; nome: string; apelido: string; cpf: string; telefone: string; email: string;
+  categoria: string; papel_administrativo: string; situacao: string;
+}
 export interface OwnerSession {
   autenticado: boolean;
   participante_id: string;
@@ -14,6 +18,9 @@ export interface OwnerSession {
   pelada?: PeladaSetup & { id: string };
   peladas?: (PeladaSetup & { id: string })[];
   total_jogadores?: number;
+  jogadores?: AdminPlayer[];
+  total_jogadores_cadastrados?: number;
+  total_jogadores_ativos?: number;
   versao_acesso?: number;
   permissoes?: { criar_pelada: boolean; administrar: boolean };
   meu_cadastro?: PersonalProfile;

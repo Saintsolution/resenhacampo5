@@ -4,7 +4,7 @@ Frontend: menu público com login; cadastro OWNER disponível somente pelo link 
 
 Convites de jogadores preservam apelido, WhatsApp e tipo. OWNER pode convidar ADMIN mensalista. ADMIN e mensalista apto convidam jogadores; diarista não convida. A permissão é conferida no backend, além da apresentação dos botões.
 
-O arquivo local privado para atualização manual é `workflows/para importar/JogoLindo.json`, com 217 nós, acompanhado de `LEIA_PRIMEIRO.md`. Parte exclusivamente do export oficial fornecido pelo usuário; não mistura pacotes antigos. O gerador está em `scripts/preparar-workflow-owner.py` e falha se o export necessário não estiver disponível.
+O arquivo local privado para atualização manual é `workflows/para importar/RESENHA_CAMPO_5.json`, com 217 nós, acompanhado de `LEIA_PRIMEIRO.md`. Parte exclusivamente do export oficial fornecido pelo usuário; não mistura pacotes antigos. O gerador está em `scripts/preparar-workflow-owner.py` e falha se o export necessário não estiver disponível.
 
 A preparação não acessa o n8n, não altera Sheets e não chama o Asaas. O teste real somente começa depois da publicação manual do novo workflow e da geração do convite OWNER pelo operador do n8n. A geração manual grava um token de convite na planilha; a inscrição de jogador por convite conserva a emissão real de boleto já existente.
 

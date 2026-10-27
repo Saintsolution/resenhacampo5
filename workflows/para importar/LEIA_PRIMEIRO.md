@@ -1,12 +1,12 @@
 # JogoLindo — cadastro separado do OWNER
 
-**Arquivo único para importar: `JogoLindo.json`, nesta pasta. 217 nós.**
+**Arquivo único para importar: `RESENHA_CAMPO_5.json`, nesta pasta. 217 nós.**
 
 Fonte exclusiva: export `workflows/resenha n8n restaurado/JogoLindo — Cadastro, Login, Peladas e Convites.json`. O original está intacto; seu hash está em `FONTE.sha256`. Não usar os pacotes antigos de Etapa A para esta atualização.
 
 ## Atualização manual do n8n
 
-1. Exporte um backup do workflow atual. No mesmo workflow, esvazie somente o canvas e importe `JogoLindo.json` uma única vez. Não importar sobre nós existentes.
+1. Exporte um backup do workflow atual. No mesmo workflow, esvazie somente o canvas e importe `RESENHA_CAMPO_5.json` uma única vez. Não importar sobre nós existentes.
 2. Confira os 217 nós. As credenciais Sheets continuam `Google Sheets account 5`; os webhooks protegidos de ensaio/retorno Asaas mantêm `jogolindo webhook`.
 3. O cadastro mudou para `POST /webhook/rc5-app-v1/cadastrar-organizador`: usa o token exclusivo do convite OWNER, não a chave compartilhada. Não manter um workflow antigo publicado nessa mesma rota.
 4. Publique. Não é necessário apagar abas, cabeçalhos ou registros existentes da planilha.
@@ -34,3 +34,7 @@ Convite OWNER: token aleatório de 64 caracteres gerado pelo Crypto nativo; só 
 Somente os ramos de cadastro/criação de pelada e a restrição de convite ADMIN foram ajustados. Todos os nós e conexões de inscrição/boleto e retorno Asaas foram comparados com o export oficial e preservados. Nenhuma nova coluna ou aba.
 
 O JSON contém configurações privadas herdadas. Não enviar ao GitHub nem ao Netlify. O site é publicado pelo Git; a atualização do n8n é manual.
+
+## Lista de jogadores no painel (atualização pontual)
+
+Para quem já publicou esta versão, não reimportar o workflow inteiro. Substituir somente o código de **Valida e Prepara Dados Sessão** pelo conteúdo de `ATUALIZAR_SOMENTE_SESSAO.code.txt`, salvar e publicar. A lista é exclusiva de OWNER/ADMIN na pelada autorizada. No app, clicar em Atualizar jogadores. Detalhes em `docs/DASHBOARD_POR_PELADA.md`.

@@ -160,3 +160,7 @@ th,.finance-link { background: #c7d0a4; }
 .password-field input { padding-right:3rem; }
 .password-toggle { position:absolute; right:.5rem; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; padding:.4rem; border:0; background:transparent; color:inherit; cursor:pointer; }
 .password-toggle:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+
+.player-directory dl { display:grid; grid-template-columns:minmax(90px, 1fr) minmax(0, 2fr); gap:6px 12px; margin:8px 0 0; }
+.player-directory dt { font-weight:600; }
+.player-directory dd { margin:0; overflow-wrap:anywhere; }

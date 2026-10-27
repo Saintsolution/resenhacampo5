@@ -38,3 +38,5 @@ dist-ssr
 /workflows/para importar/*.json
 __pycache__/
 *.pyc
+
+/workflows/para importar/*.code.txt

@@ -1,0 +1,13 @@
+// Complementa a sessão já autorizada; nunca retorna senhas, tokens ou dados de outra pelada.
+function planSessionWithPlayers(prepared,snapshot,hashes,nowMs) {
+ const result=planSession(prepared,snapshot,hashes,nowMs);
+ if(result.status!==200 || !result.response.autenticado)return result;
+ if(!['OWNER','ADMIN'].includes(result.response.papel_administrativo))return result;
+ try {
+  const club=result.response.pelada;
+  const players=readTable(snapshot,0,'JOGADORES',PLAYER_FIELDS);
+  const selected=club?players.filter(p=>p.pelada_id===club.id && ['MENSALISTA','DIARISTA'].includes(String(p.categoria).toUpperCase())):[];
+  const jogadores=selected.map(p=>({participante_id:p.participante_id,nome:p.nome,apelido:p.apelido,cpf:p.cpf,telefone:p.telefone,email:p.email,categoria:p.categoria,papel_administrativo:p.papel_administrativo,situacao:p.situacao}));
+  return {...result,response:{...result.response,jogadores,total_jogadores_cadastrados:jogadores.length,total_jogadores_ativos:jogadores.filter(p=>p.situacao==='ativo').length}};
+ }catch{return reply(503,'LISTA_INDISPONIVEL','Não foi possível carregar os jogadores desta pelada.');}
+}

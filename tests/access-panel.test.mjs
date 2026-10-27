@@ -67,3 +67,12 @@ test('menu público tem login e não oferece criação pública de pelada ou OWN
   globalThis.location={hash:'#/cadastrar-owner?convite='+'a'.repeat(64)};html=renderToStaticMarkup(React.createElement(OwnerAccess,{onDemo(){}}));assert.ok(html.includes('Salvar minha conta'));assert.ok(!html.includes('Nome da pelada'));assert.ok(!html.includes('a'.repeat(64)));assert.ok(html.includes('Mostrar confirmação de senha'));
  }finally{globalThis.location=previous;}
 });
+
+test('lista administrativa mostra nomes clicáveis e quantidade; jogador não recebe essa interface',()=>{
+ const players=[{participante_id:'P1',nome:'Participante da pelada',apelido:'Teste',cpf:'52998224725',telefone:'21912345678',email:'teste@example.invalid',categoria:'Mensalista',papel_administrativo:'',situacao:'ativo'}];
+ for(const role of ['OWNER','ADMIN','']) {
+  const session={autenticado:true,participante_id:'ACTOR',nome:'Pessoa',papel_administrativo:role,categoria:'Mensalista',expira_em:'2099-01-01',pelada:club,peladas:[club],jogadores:players};
+  const html=renderToStaticMarkup(React.createElement(AccessPanel,{...props,session}));assert.equal(html.includes('Participante da pelada'),Boolean(role));
+  if(role){assert.ok(html.includes('Jogadores da pelada · 1'));assert.ok(html.includes('aria-expanded="false"'));assert.ok(!html.includes('teste@example.invalid'));}
+ }
+});

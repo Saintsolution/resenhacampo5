@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-const file='workflows/para importar/JogoLindo.json';
+const file='workflows/para importar/RESENHA_CAMPO_5.json';
 const official='workflows/resenha n8n restaurado/JogoLindo — Cadastro, Login, Peladas e Convites.json';
 const available=fs.existsSync(file)&&fs.existsSync(official);
 const hash=x=>createHash('sha256').update(x).digest('hex');
