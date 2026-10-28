@@ -39,10 +39,10 @@ export default function InvitationAccess({onHome}:{onHome:()=>void}) {
    {!invoice&&!boleto&&<p>Peça ao organizador o link da cobrança já registrada. Não é necessário cadastrar novamente.</p>}
    <small>A confirmação depende do retorno do Asaas. Abrir o boleto não confirma o pagamento.</small>
   </>:<>
-   {error&&<p role="alert">{error}</p>}
+   {error&&!data&&<p role="alert">{error}</p>}
    {!data?!error&&<p role="status">Conferindo seu convite…</p>:<>
     <div className="entry-explanation"><strong>{data.pelada.nome}</strong><span>{data.pelada.local}<br/>{kindLabel(data.tipo)}<br/>Convite de {data.convidador}<br/>{data.data_jogo&&<>{formatGameDate(data.data_jogo)} · {data.pelada.hora_inicio} às {data.pelada.hora_fim}<br/></>}Válido até {formatDateTime(data.expira_em)}</span></div>
-    <form className="owner-form" onSubmit={submit}>
+    <form className="owner-form" onSubmit={submit} onInvalidCapture={()=>setError('Confira os campos obrigatórios e o formato do e-mail antes de continuar.')}>
      <fieldset disabled={busy} style={{border:0,padding:0,margin:0,display:'contents'}}>
       <label>Nome completo<input name="nome" required maxLength={150} autoComplete="name"/></label>
       <label>Apelido<input name="apelido" required maxLength={40} autoComplete="nickname" defaultValue={data.apelido}/></label>
@@ -53,6 +53,7 @@ export default function InvitationAccess({onHome}:{onHome:()=>void}) {
       <PasswordField label="Confirme a senha" name="confirmacao_senha" required minLength={8} maxLength={128} autoComplete="new-password" disabled={busy}/>
       {data.tipo==='DIARISTA'&&<label>Uso de colete<select name="com_colete" defaultValue="nao"><option value="nao">Sem colete</option><option value="sim">Com colete</option></select></label>}
       <small>Ao continuar, será emitida uma cobrança real no Asaas, conforme os valores cadastrados da pelada.</small>
+      {error&&<p className="owner-error" role="alert">{error}</p>}
       <button className="button primary" type="submit">{busy?'Registrando e preparando sua cobrança…':'Cadastrar e gerar cobrança'}</button>
      </fieldset>
     </form>

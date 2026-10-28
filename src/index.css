@@ -164,3 +164,11 @@ th,.finance-link { background: #c7d0a4; }
 .player-directory dl { display:grid; grid-template-columns:minmax(90px, 1fr) minmax(0, 2fr); gap:6px 12px; margin:8px 0 0; }
 .player-directory dt { font-weight:600; }
 .player-directory dd { margin:0; overflow-wrap:anywhere; }
+
+/* More contrast and medium strokes for registration on mobile screens. */
+.entry-card .owner-form { color: #18291e; font-weight: 500; }
+.entry-card .owner-form label { color: #24322a; }
+.entry-card .owner-form input,.entry-card .owner-form select { color: #19281e; font-weight: 500; }
+.entry-card .owner-form small { color: #394432; }
+.entry-card > p,.entry-card > small { color: #394432; font-weight: 500; }
+.entry-card .owner-form .owner-error { color: #84221d; background: #fff1df; border: 1px solid #84221d; border-radius: 8px; padding: 12px; line-height: 1.5; }
