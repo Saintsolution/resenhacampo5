@@ -9,6 +9,8 @@ export interface AdminPlayer {
   categoria: string; papel_administrativo: string; situacao: string;
 }
 export interface OwnerSession {
+  minhas_cobrancas?: { payment_id: string; tipo: string; competencia: string; vencimento: string; valor: number; status: string; invoice_url?: string }[];
+  cobrancas_indisponiveis?: boolean;
   autenticado: boolean;
   participante_id: string;
   nome: string;

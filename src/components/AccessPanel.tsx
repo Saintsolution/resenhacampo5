@@ -3,6 +3,7 @@ import { LogOut } from 'lucide-react';
 import InviteManager from './InviteManager';
 import PersonalDetails from './PersonalDetails';
 import PlayerList from './PlayerList';
+import { paymentLink } from '../lib/n8n/invites';
 import { nextGameDate, formatGameDate } from '../lib/matchDate';
 import { formatCurrency } from '../lib/utils';
 import type { OwnerSession, PersonalProfile } from '../lib/n8n/owner';
@@ -33,6 +34,15 @@ export default function AccessPanel({ session, token, busy, message, error, onSe
       <div className="entry-explanation"><strong>{session.papel_administrativo || session.categoria}</strong><span>{club.local}{club.cidade && <><br/>{club.cidade}</>}</span></div>
       <div className="entry-explanation"><strong>Próxima pelada</strong><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}</span>{admin && <strong>{session.total_jogadores ?? '—'} jogadores ativos cadastrados</strong>}</div>
       {admin && <PlayerList key={club.id} players={session.jogadores} busy={busy} onRefresh={() => onSelect(club.id)}/>}
+      <div className="entry-explanation"><strong>Minhas cobranças</strong>
+        <button className="button light" disabled={busy} onClick={() => onSelect(club.id)}>Atualizar cobranças</button>
+        {session.cobrancas_indisponiveis ? <span>Não foi possível consultar suas cobranças. Atualize para tentar novamente.</span> : session.minhas_cobrancas === undefined ? <span>A consulta de cobranças depende da atualização do workflow de sessão.</span> : !session.minhas_cobrancas.length ? <span>Nenhuma cobrança registrada para seu cadastro.</span> : session.minhas_cobrancas.map(charge => {
+          const link = paymentLink(charge.invoice_url);
+          const pending = ['PENDING', 'OVERDUE'].includes(charge.status);
+          const label = ({ PENDING: 'Aguardando pagamento', OVERDUE: 'Vencida — aguardando pagamento', CONFIRMED: 'Pagamento confirmado', RECEIVED: 'Pagamento recebido', REFUNDED: 'Estornada', DELETED: 'Excluída' } as Record<string, string>)[charge.status] || 'Situação em conferência';
+          return <div key={charge.payment_id}><strong>{label}</strong><p>{charge.tipo === 'MENSALIDADE' ? 'Mensalidade' : charge.tipo === 'DIARIA' ? 'Diária' : 'Cobrança'} · {charge.competencia} · {formatCurrency(charge.valor)}</p><p>Vencimento: {charge.vencimento.split('-').reverse().join('/')}</p>{pending && (link ? <a className="button primary" href={link} target="_blank" rel="noopener noreferrer">Abrir cobrança / imprimir boleto</a> : <p>Peça ao organizador o link da cobrança já registrada.</p>)}</div>;
+        })}
+      </div>
       <div className="entry-explanation"><strong>Valores da pelada</strong><span>Mensalidade: {formatCurrency(club.mensalidade)}<br/>Diária sem colete: {formatCurrency(club.diaria_sem_colete)}<br/>Diária com colete: {formatCurrency(club.diaria_com_colete)}<br/>Colete avulso: {formatCurrency(club.colete_avulso)}<br/>Vencimento mensal: dia {club.vencimento_mensal}</span></div>
     </>}
     {error && <p role="alert">{error}</p>}
