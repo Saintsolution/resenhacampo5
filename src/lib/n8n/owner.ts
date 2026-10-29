@@ -6,6 +6,8 @@ export interface PersonalProfile {
 }
 export interface PlayerCharge { payment_id: string; tipo: string; competencia: string; vencimento: string; valor: number; status: string; invoice_url?: string; pago_em?: string }
 export interface AdminPlayer {
+  convidado_por_id?: string;
+  convidado_por_nome?: string;
   cobrancas?: PlayerCharge[];
   apto?: boolean;
   participante_id: string; nome: string; apelido: string; cpf: string; telefone: string; email: string;

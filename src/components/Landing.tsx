@@ -14,7 +14,7 @@ export default function Landing({ onLogin, onDemo, onOpenClub }: { onLogin: () =
   const [loadingAgenda, setLoadingAgenda] = useState(true);
   useEffect(() => {
     let active=true, fetching=false;
-    async function refresh(){if(fetching)return;fetching=true;try{const r=await ownerRequest<{peladas:PublicClub[]}>('peladas-publicas');if(!Array.isArray(r.peladas))throw new Error('agenda');if(active){setClubs(r.peladas);setAgendaError('');}}catch{if(active)setAgendaError('Não foi possível atualizar a agenda. A lista pode estar desatualizada.');}finally{fetching=false;if(active)setLoadingAgenda(false);}}
+    async function refresh(){if(fetching)return;fetching=true;try{const r=await ownerRequest<{peladas:PublicClub[]}>('peladas-publicas');if(!Array.isArray(r.peladas))throw new Error('agenda');if(active){const now=new Date();setClubs([...r.peladas].sort((a,b)=>(nextGameDate(a,now)+'T'+a.horario_inicio).localeCompare(nextGameDate(b,now)+'T'+b.horario_inicio)||a.nome.localeCompare(b.nome,'pt-BR')));setAgendaError('');}}catch{if(active)setAgendaError('Não foi possível atualizar a agenda. A lista pode estar desatualizada.');}finally{fetching=false;if(active)setLoadingAgenda(false);}}
     void refresh();const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void refresh();},30000);
     return()=>{active=false;window.clearInterval(timer);};
   }, []);
