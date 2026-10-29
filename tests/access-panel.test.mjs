@@ -76,3 +76,11 @@ test('lista administrativa mostra nomes clicáveis e quantidade; jogador não re
   if(role){assert.ok(html.includes('Jogadores da pelada · 1'));assert.ok(html.includes('aria-expanded="false"'));assert.ok(!html.includes('teste@example.invalid'));}
  }
 });
+
+test('lista do dia ordena administradores e reserva controles aos admins',async()=>{
+ const {default:MatchBoard}=await import(moduleUrl('src/components/MatchBoard.tsx'));
+ const participants=[{participante_id:'d',apelido:'Diarista test',categoria:'Diarista',papel_administrativo:'',situacao:'ativo',apto:false},{participante_id:'m',apelido:'Mensalista test',categoria:'Mensalista',papel_administrativo:'',situacao:'ativo',apto:true},{participante_id:'a',apelido:'Admin test',categoria:'Mensalista',papel_administrativo:'ADMIN',situacao:'ativo',apto:true}];
+ const publicHtml=renderToStaticMarkup(React.createElement(MatchBoard,{name:'Campo',local:'Local',date:'2026-10-31',start:'09:00',end:'10:00',participants}));
+ assert.ok(publicHtml.indexOf('Admin test')<publicHtml.indexOf('Mensalista test'));assert.ok(publicHtml.indexOf('Mensalista test')<publicHtml.indexOf('Diarista test'));assert.ok(!publicHtml.includes('type="checkbox"'));assert.ok(publicHtml.includes('Não apto'));assert.ok(publicHtml.includes('salvar PDF'));
+ const adminHtml=renderToStaticMarkup(React.createElement(MatchBoard,{name:'Campo',local:'Local',date:'2026-10-31',start:'09:00',end:'10:00',participants,admin:true}));assert.ok(adminHtml.includes('Chegada de Admin test'));assert.ok(adminHtml.includes('ainda não são salvos'));assert.ok(adminHtml.includes('não altera a aptidão nem o caixa'));
+});

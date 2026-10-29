@@ -1,3 +1,4 @@
+import OwnerEnrollment from './OwnerEnrollment';
 import PeladaFields from './PeladaFields';
 import AccessPanel from './AccessPanel';
 import InvitationAccess from './InvitationAccess';
@@ -14,11 +15,14 @@ type Screen = 'inicio' | 'cadastro' | 'login' | 'convite';
 const fromHash = (): Screen => location.hash.startsWith('#/cadastrar-owner') ? 'cadastro' : location.hash.startsWith('#/convite') ? 'convite' : ['#/entrar', '#/admin', '#/criar-pelada'].includes(location.hash) ? 'login' : 'inicio';
 
 export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
+  const desiredClub = useRef<string>();
   const [screen, setScreen] = useState<Screen>(fromHash);
   const [ownerInvite, setOwnerInvite] = useState(() => location.hash.startsWith('#/cadastrar-owner') ? new URLSearchParams(location.hash.split('?')[1] || '').get('convite') || '' : '');
   const [pelada, setPelada] = useState<PeladaSetup>({ ...initialPelada });
   const requestId = useRef(crypto.randomUUID());
   const submitting = useRef(false);
+  const [ownerPlays, setOwnerPlays] = useState(false);
+  const [enrollingOwner, setEnrollingOwner] = useState(false);
   const [addingPelada, setAddingPelada] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -45,6 +49,20 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     const timer = window.setTimeout(() => { setAuth(null); setAddingPelada(false); setError('Sessão expirada. Entre novamente.'); setScreen('login'); }, delay);
     return () => window.clearTimeout(timer);
   }, [auth]);
+  const pollingToken=auth?.token, pollingClub=auth?.session.pelada?.id;
+  useEffect(() => {
+    if(!pollingToken||!pollingClub)return;
+    let active=true,fetching=false;
+    const token=pollingToken,id=pollingClub;
+    const timer=window.setInterval(async()=>{
+      if(fetching||submitting.current||document.visibilityState!=='visible')return;
+      fetching=true;
+      try{const session=await ownerRequest<OwnerSession>('sessao',{token,peladaId:id});if(active&&validAppSession(session)&&session.pelada?.id===id)setAuth(current=>current?.token===token&&current.session.pelada?.id===id?{token,session}:current);}
+      catch { if(active)setError('Não foi possível atualizar os pagamentos automaticamente. Use Atualizar para conferir.'); }
+      finally{fetching=false;}
+    },30000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[pollingToken,pollingClub]);
   function change(next: Screen) {
     if (busy) return;
     history.pushState(null, '', next === 'login' ? '#/entrar' : '#/');
@@ -71,10 +89,10 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
       } else {
         const login = await ownerRequest<{ token_sessao: string }>('login', { body: { cpf, senha: get('senha') } });
         if (!/^[a-f0-9]{64}$/i.test(login.token_sessao)) throw new Error('O servidor não retornou uma sessão válida.');
-        const session = await ownerRequest<OwnerSession>('sessao', { token: login.token_sessao });
+        const session = await ownerRequest<OwnerSession>('sessao', { token: login.token_sessao, peladaId: desiredClub.current });
         if (!validAppSession(session)) throw new Error('Seu perfil não tem acesso autorizado.');
         if (!Array.isArray(session.peladas) && !session.pelada) throw new Error('Não foi possível carregar suas peladas. Confira a atualização do workflow de sessão.');
-        form.reset(); setAddingPelada(false); setPelada({ ...initialPelada }); setAuth({ token: login.token_sessao, session });
+        form.reset(); setAddingPelada(false); setEnrollingOwner(false); setPelada({ ...initialPelada }); setAuth({ token: login.token_sessao, session });
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { submitting.current = false; setBusy(false); }
@@ -98,7 +116,7 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
       if (created.codigo !== 'PELADA_CRIADA' || !created.pelada_id) throw new Error('Confira o cadastro antes de repetir.');
       const session = await ownerRequest<OwnerSession>('sessao', { token: auth.token, peladaId: created.pelada_id });
       if (!validAppSession(session) || session.papel_administrativo !== 'OWNER' || session.pelada?.id !== created.pelada_id) throw new Error('A pelada foi criada, mas sua consulta não foi confirmada. Entre novamente antes de criar outra.');
-      setAuth({ token: auth.token, session }); setAddingPelada(false); requestId.current = crypto.randomUUID(); setMessage('Pelada criada e selecionada.');
+      setAuth({ token: auth.token, session }); setAddingPelada(false); setEnrollingOwner(ownerPlays); requestId.current = crypto.randomUUID(); setMessage('Pelada criada e selecionada.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível confirmar a criação. Confira os registros antes de repetir.'); }
     finally { submitting.current = false; setBusy(false); }
   }
@@ -111,17 +129,18 @@ export default function OwnerAccess({ onDemo }: { onDemo: () => void }) {
     finally { submitting.current = false; setBusy(false); }
   }
   if (screen === 'convite' && !auth) return <InvitationAccess onHome={() => change('inicio')}/>;
-  if (screen === 'inicio' && !auth) return <Landing onLogin={() => change('login')} onDemo={onDemo}/>;
+  if (screen === 'inicio' && !auth) return <Landing onLogin={() => change('login')} onDemo={onDemo} onOpenClub={id => { desiredClub.current = id; change('login'); }}/>;
   if (auth && auth.session.papel_administrativo === 'OWNER' && addingPelada) return <div className="demo-entry"><section className="entry-card owner-panel">
     <h1>{auth.session.pelada ? 'Criar outra pelada' : 'Criar minha pelada'}</h1><p>Olá, {auth.session.nome}.</p>
-    <form className="owner-form" onSubmit={createPelada}><PeladaFields value={pelada} onField={field} disabled={busy}/>
+    <form className="owner-form" onSubmit={createPelada}><PeladaFields value={pelada} onField={field} disabled={busy}/><label className="checkbox-label"><input type="checkbox" checked={ownerPlays} disabled={busy} onChange={e => setOwnerPlays(e.target.checked)}/>Também vou jogar como mensalista</label>{ownerPlays && <p>Após criar a pelada, confirme sua senha para gerar sua mensalidade normal. Seu papel de OWNER será mantido.</p>}
       {error && <p role="alert">{error}</p>}<button className="button primary" disabled={busy}>{busy ? 'Salvando…' : 'Criar pelada'}</button>
     </form><button className="button light" disabled={busy} onClick={() => { setAddingPelada(false); setError(''); }}>Voltar ao painel</button>
     <button className="text-button" disabled={busy} onClick={logout}>Sair</button>
   </section></div>;
+  if (auth && auth.session.papel_administrativo === 'OWNER' && enrollingOwner) return <div className="demo-entry"><section className="entry-card owner-panel"><OwnerEnrollment session={auth.session} token={auth.token} onDone={() => { setEnrollingOwner(false); if(auth.session.pelada) void selectPelada(auth.session.pelada.id); }}/><button className="button light" onClick={() => setEnrollingOwner(false)}>Concluir inscrição depois</button></section></div>;
   if (auth) return <AccessPanel key={auth.session.pelada?.id || auth.session.participante_id} session={auth.session} token={auth.token} busy={busy} message={message} error={error}
-    onSelect={id => void selectPelada(id)} onLogout={() => void logout()}
-    onCreate={() => { if (auth.session.papel_administrativo !== 'OWNER') return; setPelada({ ...initialPelada }); requestId.current = crypto.randomUUID(); setAddingPelada(true); setError(''); setMessage(''); }}
+    onEnroll={() => setEnrollingOwner(true)} onSelect={id => void selectPelada(id)} onLogout={() => void logout()}
+    onCreate={() => { if (auth.session.papel_administrativo !== 'OWNER') return; setOwnerPlays(false); setPelada({ ...initialPelada }); requestId.current = crypto.randomUUID(); setAddingPelada(true); setError(''); setMessage(''); }}
     onProfileSaved={profile => setAuth(current => current ? { ...current, session: { ...current.session, meu_cadastro: profile } } : null)}/>;
   const registration = screen === 'cadastro', invited = /^[a-f0-9]{64}$/i.test(ownerInvite);
   return <div className="demo-entry"><section className="entry-card"><BackButton disabled={busy} onClick={() => change('inicio')}/><div className="eyebrow">JOGOLINDO</div>

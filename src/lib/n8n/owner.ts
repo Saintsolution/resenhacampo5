@@ -4,11 +4,18 @@ import { n8nBaseUrl } from './config';
 export interface PersonalProfile {
   nome: string; cpf: string; apelido: string; telefone: string; email: string; contato_editavel: boolean;
 }
+export interface PlayerCharge { payment_id: string; tipo: string; competencia: string; vencimento: string; valor: number; status: string; invoice_url?: string; pago_em?: string }
 export interface AdminPlayer {
+  cobrancas?: PlayerCharge[];
+  apto?: boolean;
   participante_id: string; nome: string; apelido: string; cpf: string; telefone: string; email: string;
   categoria: string; papel_administrativo: string; situacao: string;
 }
+export interface MatchParticipant { participante_id: string; apelido: string; categoria: string; papel_administrativo: string; situacao: string; apto: boolean }
 export interface OwnerSession {
+  historico_partidas?: { data: string; participantes: MatchParticipant[] }[];
+  proxima_partida?: { data: string; participantes: MatchParticipant[]; total_aptos: number };
+  partida_indisponivel?: boolean;
   minhas_cobrancas?: { payment_id: string; tipo: string; competencia: string; vencimento: string; valor: number; status: string; invoice_url?: string }[];
   cobrancas_indisponiveis?: boolean;
   autenticado: boolean;
@@ -35,7 +42,7 @@ export interface OwnerRegistration {
   senha: string; confirmacao_senha: string;
 }
 const configuredBase = import.meta.env.VITE_N8N_APP_BASE_URL || `${n8nBaseUrl}/webhook/rc5-app-v1`;
-export async function ownerRequest<T>(path: 'cadastrar-organizador' | 'login' | 'sessao' | 'logout' | 'convites' | 'validar-convite' | 'inscrever-jogador' | 'peladas' | 'meu-cadastro', options: { body?: unknown; activation?: string; token?: string; method?: 'GET' | 'POST'; requestId?: string; peladaId?: string } = {}): Promise<T> {
+export async function ownerRequest<T>(path: 'cadastrar-organizador' | 'login' | 'sessao' | 'logout' | 'convites' | 'validar-convite' | 'inscrever-jogador' | 'peladas' | 'meu-cadastro' | 'peladas-publicas', options: { body?: unknown; activation?: string; token?: string; method?: 'GET' | 'POST'; requestId?: string; peladaId?: string } = {}): Promise<T> {
   const base = new URL(configuredBase.replace(/\/$/, '') + '/');
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) throw new Error('Configure a URL HTTPS dos webhooks no aplicativo.');
   let response: Response;
@@ -43,7 +50,7 @@ export async function ownerRequest<T>(path: 'cadastrar-organizador' | 'login' | 
     const url = new URL(path, base);
     if (options.peladaId) url.searchParams.set('pelada_id', options.peladaId);
     response = await fetch(url, {
-      method: options.method ?? (path === 'sessao' ? 'GET' : 'POST'),
+      method: options.method ?? (['sessao','peladas-publicas'].includes(path) ? 'GET' : 'POST'),
       headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.activation ? { 'X-RC5-Ativacao': options.activation } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(options.requestId ? { 'Idempotency-Key': options.requestId } : {}) },
       body: options.body ? JSON.stringify(options.body) : undefined,
       cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(path === 'inscrever-jogador' ? 190000 : 20000),

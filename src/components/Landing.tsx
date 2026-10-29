@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import MatchBoard from './MatchBoard';
+import type { MatchParticipant } from '../lib/n8n/owner';
+import { ownerRequest } from '../lib/n8n/owner';
+import { nextGameDate, formatGameDate } from '../lib/matchDate';
+import type { PeladaSetup } from '../lib/n8n/bootstrap';
 import { ArrowUpRight, CalendarDays, Menu, Pause, Play, RotateCcw, ShieldCheck, Users, Volume2, VolumeX, X } from 'lucide-react';
 
-export default function Landing({ onLogin, onDemo }: { onLogin: () => void; onDemo: () => void }) {
+export default function Landing({ onLogin, onDemo, onOpenClub }: { onLogin: () => void; onDemo: () => void; onOpenClub: (id: string) => void }) {
+  type PublicClub = Pick<PeladaSetup, 'nome' | 'local' | 'dia_semana' | 'horario_inicio' | 'horario_fim'> & { id: string; proxima_partida?: { data: string; participantes: MatchParticipant[] } };
+  const [openedClub,setOpenedClub] = useState<string | null>(null);
+  const [clubs, setClubs] = useState<PublicClub[]>([]);
+  const [agendaError, setAgendaError] = useState('');
+  const [loadingAgenda, setLoadingAgenda] = useState(true);
+  useEffect(() => {
+    let active=true, fetching=false;
+    async function refresh(){if(fetching)return;fetching=true;try{const r=await ownerRequest<{peladas:PublicClub[]}>('peladas-publicas');if(!Array.isArray(r.peladas))throw new Error('agenda');if(active){setClubs(r.peladas);setAgendaError('');}}catch{if(active)setAgendaError('Não foi possível atualizar a agenda. A lista pode estar desatualizada.');}finally{fetching=false;if(active)setLoadingAgenda(false);}}
+    void refresh();const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void refresh();},30000);
+    return()=>{active=false;window.clearInterval(timer);};
+  }, []);
+
   const video = useRef<HTMLVideoElement>(null);
   const [menu, setMenu] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -51,7 +68,7 @@ export default function Landing({ onLogin, onDemo }: { onLogin: () => void; onDe
     </section>
     <main className="welcome-content"><section className="welcome-intro"><div><div className="eyebrow">MENOS ORGANIZAÇÃO NO GRUPO. MAIS BOLA EM CAMPO.</div><h1>A turma se encontra.<br/>O jogo acontece.</h1></div><div><p>Um lugar para reunir os jogadores, combinar a próxima partida e deixar a resenha em dia. Do primeiro convite ao apito final, cada um sabe onde entrar.</p><div className="welcome-actions"><button className="button primary" onClick={onLogin}>Entrar na minha pelada<ArrowUpRight size={17}/></button></div></div></section>
       <section className="welcome-features" aria-label="Como funciona"><article><Users size={23}/><h2>Junte sua turma</h2><p>Crie a pelada e convide mensalistas e diaristas para participar.</p></article><article><CalendarDays size={23}/><h2>Deixe o jogo combinado</h2><p>Local, horário, presença e fila reunidos para o dia da partida.</p></article><article><ShieldCheck size={23}/><h2>Divida a organização</h2><p>O dono pode convidar administradores e definir o que cada um pode fazer.</p></article></section>
-      <section id="peladas-proximas" className="welcome-peladas"><div className="welcome-section-heading"><div><div className="eyebrow">BORA JOGAR?</div><h2>Peladas próximas</h2></div><span>Seu próximo encontro começa aqui.</span></div><div className="welcome-empty"><CalendarDays size={30}/><h3>Espaço para a primeira resenha</h3><p>As peladas cadastradas aparecerão nesta seção, com local e horário para você encontrar sua turma.</p><small>A consulta de peladas ainda será conectada. Nenhuma pelada demonstrativa é exibida nesta lista.</small><button className="button primary" onClick={onLogin}>Entrar na minha pelada<ArrowUpRight size={16}/></button></div></section>
+      <section id="peladas-proximas" className="welcome-peladas"><div className="welcome-section-heading"><div><div className="eyebrow">BORA JOGAR?</div><h2>Peladas próximas</h2></div><span>Seu próximo encontro começa aqui.</span></div><div className="welcome-agenda">{loadingAgenda ? <p role="status">Consultando próximas peladas…</p> : agendaError && !clubs.length ? <p role="status">{agendaError}</p> : !clubs.length ? <p>Nenhuma pelada disponível no momento.</p> : clubs.map(club => <article className="entry-explanation" key={club.id}><button className="text-button" aria-expanded={openedClub === club.id} onClick={() => setOpenedClub(openedClub === club.id ? null : club.id)}><h3>{club.nome}</h3></button><span>{formatGameDate(nextGameDate(club))}<br/>{club.horario_inicio} às {club.horario_fim}<br/>{club.local}</span><button className="button primary" onClick={() => setOpenedClub(openedClub === club.id ? null : club.id)}>Abrir quadro da pelada<ArrowUpRight size={16}/></button>{openedClub === club.id && <MatchBoard name={club.nome} local={club.local} date={club.proxima_partida?.data || nextGameDate(club)} start={club.horario_inicio} end={club.horario_fim} participants={club.proxima_partida?.participantes}/>}<button className="text-button" onClick={() => onOpenClub(club.id)}>Entrar na minha área</button></article>)}</div></section>
       <footer className="welcome-footer"><span>Futebol entre amigos. Organização para todo mundo.</span><button className="text-button" onClick={onDemo}>Conhecer a demonstração</button></footer>
     </main>
   </div>;
