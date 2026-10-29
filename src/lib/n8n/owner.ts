@@ -13,7 +13,7 @@ export interface AdminPlayer {
   participante_id: string; nome: string; apelido: string; cpf: string; telefone: string; email: string;
   categoria: string; papel_administrativo: string; situacao: string;
 }
-export interface MatchParticipant { participante_id: string; apelido: string; categoria: string; papel_administrativo: string; situacao: string; apto: boolean }
+export interface MatchParticipant { convidado_por_nome?: string; participante_id: string; apelido: string; categoria: string; papel_administrativo: string; situacao: string; apto: boolean }
 export interface OwnerSession {
   historico_partidas?: { data: string; participantes: MatchParticipant[] }[];
   proxima_partida?: { data: string; participantes: MatchParticipant[]; total_aptos: number };
