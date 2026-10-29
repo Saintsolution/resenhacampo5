@@ -1,4 +1,6 @@
-# Autenticação JogoLindo — proposta para aprovação
+# Autenticação Resenha Campo5 — proposta para aprovação
+
+> Proposta histórica, não descrição da implantação atual. Consulte [HANDOFF](../HANDOFF.md) para contratos e limitações vigentes. O caminho legado abaixo foi preservado como registro, sem renomear endpoints.
 
 Estado: preparação local; nenhum login real, workflow, planilha ou configuração remota criado/alterado. Não contratar outro serviço nem introduzir outro armazenamento de negócio.
 
@@ -55,7 +57,7 @@ Se a interface e o backend forem de origens distintas, validar suporte do navega
 
 Requisições mutáveis exigem Origin/Referer confiável, JSON e token CSRF em `X-CSRF-Token`. O CSRF é vinculado à sessão (somente seu hash armazenado) e entregue em JSON por login/sessão para memória do frontend. Cookies HttpOnly sozinhos e CORS sozinhos não substituem CSRF. Login e demais operações sem sessão também verificam origem e formato do conteúdo.
 
-OWNER/ADMIN são lidos da associação do usuário ao participante da Resenha Campo 5; nunca de campos enviados pelo cliente. Categoria financeira permanece separada. ADMIN não promove privilégios, altera titularidade ou credenciais. Financeiro geral somente OWNER/ADMIN; jogador consulta seus próprios pagamentos. Ricardo precisa ser vinculado à identidade verificada do responsável numa etapa aprovada; o nome exibido não concede OWNER.
+OWNER/ADMIN são lidos da associação do usuário ao participante da Resenha Campo5; nunca de campos enviados pelo cliente. Categoria financeira permanece separada. ADMIN não promove privilégios, altera titularidade ou credenciais. Financeiro geral somente OWNER/ADMIN; jogador consulta seus próprios pagamentos. novo responsável precisa ser vinculado à identidade verificada do responsável numa etapa aprovada; o nome exibido não concede OWNER.
 
 ## 5. Endpoints PROPOSTOS, não existentes
 
@@ -91,9 +93,9 @@ NÃO criada. Acesso somente responsável técnico e credencial n8n; sem comparti
 
 As três abas iniciais mantêm os campos solicitados. Complementos são necessários para vínculo, inatividade, revogação de tokens, proteção contra abuso e recuperação de operações parciais. IDs e finalidade distinguem convite, confirmação de e-mail e recuperação. Não duplicar tokens entre CONVITES e TOKENS_AUTH: operacional guarda metadados; a privada guarda o hash. Hash/salt de senha nunca é devolvido ao app.
 
-`cpf_hmac`: HMAC-SHA256 de CPF normalizado, com chave persistente protegida no servidor e namespace fixo Resenha Campo 5; o CPF tem espaço pequeno e não deve usar SHA-256 simples para deduplicação. Não armazenar CPF completo nessa planilha. `destinatario_hmac` protege a associação ao destinatário do convite. Chaves de limite podem derivar de e-mail/IP sob HMAC, com retenção curta. Segredos HMAC não ficam no Sheets ou frontend; rotação exige plano para manter a deduplicação.
+`cpf_hmac`: HMAC-SHA256 de CPF normalizado, com chave persistente protegida no servidor e namespace fixo Resenha Campo5; o CPF tem espaço pequeno e não deve usar SHA-256 simples para deduplicação. Não armazenar CPF completo nessa planilha. `destinatario_hmac` protege a associação ao destinatário do convite. Chaves de limite podem derivar de e-mail/IP sob HMAC, com retenção curta. Segredos HMAC não ficam no Sheets ou frontend; rotação exige plano para manter a deduplicação.
 
-O CPF completo só transita por TLS para validação/cadastro Asaas, após aprovação da etapa financeira; o cliente não recebe CPF alheio. ID cliente Asaas sempre pertence à conta de Ricardo, obtido pelo backend. Conta ativa, CPF válido, papel e pagamento são verificações distintas.
+O CPF completo só transita por TLS para validação/cadastro Asaas, após aprovação da etapa financeira; o cliente não recebe CPF alheio. ID cliente Asaas sempre pertence à conta de novo responsável, obtido pelo backend. Conta ativa, CPF válido, papel e pagamento são verificações distintas.
 
 ## 7. Abuso, logs e concorrência
 

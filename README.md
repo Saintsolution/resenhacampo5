@@ -1,62 +1,58 @@
-# Resenha Futebol Campo 5
+# Resenha Campo5
 
-Interface demonstrativa para a Resenha Futebol Campo 5. React, Vite e TypeScript.
+Aplicação para organizar peladas, convites, participantes e consultas financeiras. O frontend usa React, TypeScript, Vite e Tailwind CSS; os fluxos operacionais usam n8n, Google Sheets e Asaas.
 
-## Desenvolvimento
+A versão 01 foi preparada para operação supervisionada em 29/10/2026. Existem funcionalidades conectadas e pagamentos homologados; presença persistente, histórico esportivo, scout e recorrência mensal continuam pendentes. A versão do pacote npm ainda é `0.0.0`; “versão 01” é a identificação de entrega adotada pelo responsável, sem tag de release criada nesta organização.
+
+## Documentação
+
+- [HANDOFF — memorial técnico e continuidade](docs/HANDOFF.md): começar por aqui.
+- [CHANGELOG — evolução comprovada](docs/CHANGELOG.md).
+- [DECISIONS — decisões e regras](docs/DECISIONS.md).
+- [Índice dos relatórios preservados](docs/relatorios/README.md).
+
+## Executar localmente
+
+Usar Node.js 22, conforme a configuração do Netlify, e npm com o lockfile existente.
 
 ```sh
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
-## Verificação
+O Vite informa a porta local. **O exemplo de ambiente aponta para o n8n de produção**: abrir a aplicação pode consultar a agenda real; cadastro, convites e inscrições podem gravar e emitir cobrança real. Antes de testar esses fluxos, configurar webhooks e planilha de homologação isolados. Não usar registros reais como fixtures.
+
+Variáveis públicas: `VITE_N8N_BASE_URL`, `VITE_N8N_APP_BASE_URL` e `VITE_N8N_BOOTSTRAP_URL`. A última pertence ao transporte legado de cadastro conjunto, mantido no código; a jornada atual cadastra o OWNER por convite e cria a pelada depois do login. Nenhuma variável `VITE_*` pode conter segredo: seu conteúdo fica público no bundle.
 
 ```sh
 npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run preview
 ```
 
-## Netlify
+Na auditoria documental de 29/10/2026, `npm test` executou 98 testes: 96 passaram e dois falharam por expectativas/fixtures desatualizadas. Veja o [estado dos testes](docs/HANDOFF.md#testes-e-validação). Os comandos não comprovam homologação remota.
 
-Conecte o repositório `Saintsolution/resenhacampo5` e a branch `main`. A configuração está em `netlify.toml`:
+## Estrutura
 
-- Build: `npm run build`
-- Diretório publicado: `dist`
-- Node.js: 22
-- Redirecionamento SPA para permitir acesso direto a futuras telas.
+| Caminho | Responsabilidade |
+| --- | --- |
+| `src/components/` | Landing, acesso real, painel, convites, quadro e fichas |
+| `src/lib/n8n/` | Contratos e transporte dos endpoints |
+| `src/App.tsx`, `src/lib/demo.ts` | Entrada da aplicação e demonstração legada |
+| `src/types/`, `src/context/`, `src/screens/` | Modelos e módulos preservados; nem todos integram a jornada atual |
+| `tests/` | Testes Node, renderização React e contratos/fluxos locais |
+| `workflows/` | Exports, fontes, entregas pontuais e históricos n8n |
+| `scripts/` | Preparação local de pacotes; não executar como publicação automática |
+| `supabase/migrations/` | Modelo SQL histórico, fora da arquitetura ativa do MVP |
+| `docs/` | Memorial, decisões e relatórios |
 
-Não é necessário configurar segredos para publicar a demonstração. `.env.example` contém somente o endereço público confirmado do n8n. Nunca coloque credenciais Google/Asaas ou segredos em variáveis `VITE_*`, pois elas ficam públicas no bundle.
+## Publicação e operação
 
-O endereço Netlify será definido pelo responsável pela publicação. Ele deverá ser informado na etapa de autenticação para configurar links de e-mail, CORS e cookies. A publicação da interface não ativa login, envio de e-mail ou recuperação de senha.
+Site: https://resenhacampo5.netlify.app/. Repositório: `Saintsolution/resenhacampo5`, branch `main`. O Netlify publica automaticamente após push: build `npm run build`, saída `dist`, configuração em `netlify.toml`.
 
-## Estado atual
+O usuário publica os workflows no n8n. Um JSON local, seu campo `active` ou um build React bem-sucedido não comprovam a versão ativa no servidor. Antes de alterar um fluxo, obter o export atual e conferir endpoints, conexões e credenciais. Preferir correções pontuais nos nós existentes.
 
-Modo demonstrativo com acesso explícito como organizador, sem senha ou sessão real. Jogadores, convites, pagamentos simulados, despesas e fila são salvos apenas no navegador (localStorage). Use “Reiniciar demonstração” para restaurar os exemplos. Se o armazenamento estiver indisponível, o aplicativo avisa e continua em memória. Backend previsto: n8n + Google Sheets; financeiro: Asaas. Nenhum endpoint de autenticação está conectado e não há cobranças reais nesta interface.
-
-A proposta de autenticação e o procedimento criptográfico isolado estão em `docs/n8n/`. Os scripts SQL antigos são preservados somente como histórico.
-
-## Apresentação prática
-
-Entre como organizador no modo demonstração. Em Convites, crie um exemplo e use “Simular inscrição”. Em Financeiro, confirme um pagamento fictício; em Jogos, inclua o participante na fila. O painel administrativo consolida os resultados. Não informe CPF, senha ou dados reais. Nenhuma ação dessa interface envia mensagens, chama o n8n ou emite cobranças.
-
-### Criação da pelada — etapa A
-
-- `/#/`: entrada com **Criar minha pelada** e **Entrar na minha pelada**.
-- `/#/criar-pelada`: dados do organizador → configuração revisável da pelada. Voltar preserva a revisão em memória; cancelar ou recarregar descarta os dados pessoais.
-- `/#/entrar`: tela de acesso existente.
-
-O cadastro conjunto está preparado em `src/lib/n8n/bootstrap.ts`: um POST com `{ organizador, pelada }`, header `X-RC5-Ativacao` digitado pelo responsável e `Idempotency-Key` mantida por tentativa. Nenhum segredo é configurado no frontend. Somente após confirmar o endereço na etapa B, preencher `VITE_N8N_BOOTSTRAP_URL`; sem ele, o envio fica indisponível com aviso na tela. Não usar o webhook 09, pois ele ainda grava apenas o OWNER. O backend deverá validar todos os dados e garantir a gravação conjunta/idempotente de JOGADORES + PELADAS, retornando `{ sucesso: true, codigo: "PELADA_CRIADA" }` após concluir a operação. A chave enviada pelo frontend, sozinha, não implementa idempotência no backend.
-
-Nenhum workflow/Sheets foi alterado pela etapa A. Não há gravação ao avançar da primeira para a segunda tela. Dados do cadastro e senha não são persistidos em localStorage/sessionStorage/URL. Teste local: `npm run dev`, abrir a URL indicada pelo Vite e seguir **Criar minha pelada**.
-
-### Primeiro fluxo conectado
-
-O pacote de cadastro conjunto e dashboard está descrito em [README_PRIMEIRO_ACESSO.md](workflows/n8n/README_PRIMEIRO_ACESSO.md). O workflow 13 substitui o 09 na jornada de criação de conta e pelada. O envio conjunto e a consulta de sessão agora têm implementação local de backend; falta configurar/importar e validar no n8n. A URL final de bootstrap permanece dependente da configuração do ambiente.
-
-O fluxo atual do workflow 13 e da sessão 11 utiliza exclusivamente **PELADAS** para os dados da pelada; CONFIG permanece intacta. O cadastro gera os IDs e grava os vínculos de OWNER e pelada no mesmo lote.
-
-### Convites no painel real
-
-O painel agora oferece **Convidar jogador** e a lista de convites. Importação dos workflows 14–16 e teste pelo WhatsApp: [README_CONVITES.md](workflows/n8n/README_CONVITES.md). A abertura pública `/#/convite?token=...` valida o convite e mostra seus dados; inscrição/e-mail/cobrança são a etapa seguinte.
+Não versionar `.env`, backups, exports privados, tokens ou dados de jogadores. Há arquivos locais não versionados e alterações anteriores à documentação; revisar cada arquivo antes de preparar qualquer commit.
