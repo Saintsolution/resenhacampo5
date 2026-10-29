@@ -40,10 +40,10 @@ test('painel real separa OWNER, ADMIN e jogador e não mistura peladas na seleç
   assert.equal(html.includes('ÁREA DO JOGADOR'),role==='');
  }
 });
-test('formulário inicial real não preenche nome, local, horários, valores ou regras da Resenha',()=>{
+test('formulário mantém identidade e horários vazios com valores padrão editáveis',()=>{
  const html=renderToStaticMarkup(React.createElement(PeladaFields,{value:initialPelada,onField(){},disabled:false}));
  assert.ok(!/RESENHA|Flamengo|Rio de Janeiro|NaN|09:00|10:00/.test(html));
- assert.ok(html.includes('Selecione'));assert.equal((html.match(/value=""/g)||[]).length,12);
+ assert.ok(html.includes('Selecione'));assert.equal((html.match(/value=""/g)||[]).length,6);
 });
 test('cadastro pessoal mantém identidade somente para consulta e bloqueia contato vinculado',()=>{
  const html=renderToStaticMarkup(React.createElement(PersonalDetails,{profile:{...profile,contato_editavel:false},token:'token-local',onSaved(){}}));

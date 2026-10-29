@@ -8,8 +8,8 @@ export interface PeladaSetup {
 }
 export const initialPelada: PeladaSetup = {
   nome: '', local: '', cidade: '', dia_semana: -1,
-  horario_inicio: '', horario_fim: '', mensalidade: NaN, diaria_sem_colete: NaN,
-  diaria_com_colete: NaN, colete_avulso: NaN, vencimento_mensal: NaN, validade_convite_horas: NaN,
+  horario_inicio: '', horario_fim: '', mensalidade: 30, diaria_sem_colete: 15,
+  diaria_com_colete: 20, colete_avulso: 5, vencimento_mensal: 10, validade_convite_horas: 72,
 };
 export interface BootstrapPayload { organizador: OwnerRegistration & { apelido: string }; pelada: PeladaSetup }
 export function validatePelada(p: PeladaSetup): string | null {
